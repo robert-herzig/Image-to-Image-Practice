@@ -42,6 +42,7 @@ class LearningController:
         self.testloader = data_manager.DataManager(data_root, train=False)
 
         #the loss functions
+        #overall objective should be: arg min max LcGAN(G, D) + lambda*L1_loss(G)
         self.gan_loss = gan_loss.GANLoss()
         self.l1_loss = nn.L1Loss()
         self.mse_loss = nn.MSELoss()
