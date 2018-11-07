@@ -19,7 +19,7 @@ class LearningController:
         self.cur_index = 0
 
 
-    def prepare(self, data_root, use_gpu, seed=9876):
+    def prepare(self, data_root, use_gpu, load_models, load_path_G, load_path_D, seed=9876):
         # PREPARATION BEFORE LEARNING CAN BEGIN!
         ####################################################
         if use_gpu and not torch.cuda.is_available():
@@ -30,9 +30,15 @@ class LearningController:
         if use_gpu:
             torch.cuda.manual_seed(seed)
 
-        #Create G and D, save them as class variables for later use (test etc)
-        self.G = generator_model.get_generator_model(3, 3, 8, use_gpu)
-        self.D = discriminator_model.get_discriminator_model(3 + 3, 8, use_gpu)
+        if load_models and os.path.isfile(load_path_G) and os.path.isfile(load_path_D):
+            print("LOAD")
+            self.G = torch.load(load_path_G)
+            self.D = torch.load(load_path_D)
+            print("Successfully loaded G and D")
+        else:
+            #Create G and D, save them as class variables for later use (test etc)
+            self.G = generator_model.get_generator_model(3, 3, 8, use_gpu)
+            self.D = discriminator_model.get_discriminator_model(3 + 3, 8, use_gpu)
         #debugging output just for testing
         print_network(self.G)
         print_network(self.D)
@@ -69,10 +75,10 @@ class LearningController:
         self.real_a = Variable(self.real_a)
         self.real_b = Variable(self.real_b)
 
-    def learn(self, data_root, use_gpu, num_epochs = 10, seed=9876):
+    def learn(self, data_root, use_gpu,  load_models, load_path_G, load_path_D, num_epochs = 10, seed=9876):
         #We need to prepare our variables first. I do this in the prepare() method
         # to keep the code a little cleaner
-        self.prepare(data_root, use_gpu, seed)
+        self.prepare(data_root, use_gpu, load_models, load_path_G, load_path_D, seed)
 
         #Actual training starts here
         # enumerate through the trainloader - thanks torch.utils.data, great job!
