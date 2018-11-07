@@ -15,4 +15,4 @@ class Main:
 
 if __name__ == '__main__':
     main_controller = Main()
-    main_controller.test("data\\facades", 3)
+    main_controller.test("data/facades", 3)
