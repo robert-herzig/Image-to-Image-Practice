@@ -9,10 +9,11 @@ class Main:
         for epoch in range(0, num_epochs):
             print("EPOCH " + str(epoch) + " " + "#"*20)
             self.learning_controller.learn(data_root, use_gpu=True)
-            self.learning_controller.test(True)
-            if epoch % 2 == 0:
+
+            if epoch % 10 == 0:
                 self.learning_controller.checkpoint(epoch)
+        self.learning_controller.test(True)
 
 if __name__ == '__main__':
     main_controller = Main()
-    main_controller.test("data/facades", 3)
+    main_controller.test("data/facades", 100)
