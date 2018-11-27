@@ -173,3 +173,4 @@ fabric.properties
 datasets/*
 *.jpg
 checkpoint/*
+result/*
