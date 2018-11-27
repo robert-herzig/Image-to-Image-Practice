@@ -10,10 +10,12 @@ class double_conv_block(nn.Module):
     def __init__(self, num_channels_in, num_channels_out):
         super(double_conv_block, self).__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(num_channels_in, num_channels_out, 3, padding=1),
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(num_channels_in, num_channels_out, 3, padding=0),
             nn.BatchNorm2d(num_channels_out),
             nn.ReLU(inplace=True),
-            nn.Conv2d(num_channels_out, num_channels_out, 3, padding=1),
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(num_channels_out, num_channels_out, 3, padding=0),
             nn.BatchNorm2d(num_channels_out),
             nn.ReLU(inplace=True)
         )

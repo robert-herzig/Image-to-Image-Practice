@@ -13,6 +13,8 @@ from math import log10
 import os
 import img_util
 
+from torch.utils import data
+
 class LearningController:
     def __init__(self):
         print("INIT LEARNING CONTROLLER")
@@ -37,8 +39,9 @@ class LearningController:
             print("Successfully loaded G and D")
         else:
             #Create G and D, save them as class variables for later use (test etc)
-            self.G = generator_model.get_generator_model(3, 3, 8, use_gpu)
-            self.D = discriminator_model.get_discriminator_model(3 + 3, 8, use_gpu)
+            self.G = generator_model.get_generator_model(3, 1, 8, use_gpu) #TODO: This 1 is for depth tests
+            self.D = discriminator_model.get_discriminator_model(3 + 1, 8, use_gpu) #3 is for the condition (RGB) and
+                                                                                    # +3 / +1 is for the output image
         #debugging output just for testing
         print_network(self.G)
         print_network(self.D)
@@ -46,6 +49,9 @@ class LearningController:
         #data managers using the torch data util methods
         self.trainloader = data_manager.DataManager(data_root, train=True)
         self.testloader = data_manager.DataManager(data_root, train=False)
+
+        self.train_data_generator = data.DataLoader(self.trainloader, batch_size=32)
+        self.test_data_generator = data.DataLoader(self.testloader, batch_size=32)
 
         #the loss functions
         #overall objective should be: arg min max LcGAN(G, D) + lambda*L1_loss(G)
@@ -60,6 +66,10 @@ class LearningController:
         #init a and b vars, we need them for our two input images
         self.real_a = torch.FloatTensor(1, 3, 256, 256)
         self.real_b = torch.FloatTensor(1, 3, 256, 256)
+
+        #FOR DEPTH TEST!!!
+        # self.real_a = torch.FloatTensor(1, 3, 240, 320)
+        # self.real_b = torch.FloatTensor(1, 3, 240, 320)
 
         #get all the relevant variables ready for the gpu
         if use_gpu:
@@ -78,20 +88,24 @@ class LearningController:
     def learn(self, data_root, use_gpu,  load_models, load_path_G, load_path_D, num_epochs = 10, seed=9876):
         #We need to prepare our variables first. I do this in the prepare() method
         # to keep the code a little cleaner
-        self.prepare(data_root, use_gpu, load_models, load_path_G, load_path_D, seed)
+        # self.prepare(data_root, use_gpu, load_models, load_path_G, load_path_D, seed)
 
         #Actual training starts here
         # enumerate through the trainloader - thanks torch.utils.data, great job!
+        #TODO: Use batches properly!
+        # iteration = 0
         for iteration, batch in enumerate(self.trainloader, 1):
+            # for train_a, train_b in self.train_data_generator:
             # real_input_cpu, real_output_cpu = batch[0], batch[1] #retrieve a and b from our loader
             #TODO: Do I have to put torch.no_grad() around much more or only this block?
             with torch.no_grad():
                 real_input, real_output = Variable(batch[0]), Variable(batch[1])
+                # real_input, real_output = Variable(train_a, train_b)
                 if use_gpu:
                     real_input = real_input.cuda()
                     real_output = real_output.cuda()
 
-            self.real_a = real_input.unsqueeze(0) #should stay consistently at a/b or input/output, phew
+            self.real_a = real_input.unsqueeze(0) #should stay consistently at a/b or input/output
             self.real_b = real_output.unsqueeze(0)
 
             #let G generate the fake image
@@ -102,6 +116,7 @@ class LearningController:
             self.optimizerG.zero_grad()
 
             #fake_complete is concatenation of real input and the fake (generated) output
+            #The Discriminator is also conditioned on real a
             fake_complete = torch.cat((self.real_a, fake_b), 1)
             #pred_fake is then the prediction of the discriminator on the fake output
             pred_fake = self.D.forward(fake_complete.detach())
@@ -126,17 +141,18 @@ class LearningController:
             loss_g_gan = self.gan_loss(pred_fake, True)
 
             # Addition of l1 loss
-            loss_g_l1 = self.l1_loss(fake_b, self.real_b) * 10
+            loss_g_l1 = self.l1_loss(fake_b, self.real_b) * 2 #In the paper they recommend lambda = 100!
 
             # get combined loss for G and do backprop + optimizer step
             loss_g = loss_g_gan + loss_g_l1
+            print("LOSS G CONSISTING OF GAN: " + str(loss_g_gan.data.item()) + " L1: " + str(loss_g_l1.data.item()))
             loss_g.backward()
             self.optimizerG.step()
 
             print("STEP " + str(iteration) + "/" + str(len(self.trainloader)) + ": D-LOSS: " + str(loss_d.data.item()) +
                   " G-LOSS: " + str(loss_g.data.item()))
 
-    def test(self, use_gpu, generate_imgs=True):
+    def test(self, use_gpu, epoch_index, generate_imgs=True):
         psnr_sum = 0 # Peak Signal to Noise Ratio:
                 #PSNR = 10 * log_10 (MAX^2_I / MSE), max here is 1
         test_counter = 0 #this is for naming the result images in for our test
@@ -144,7 +160,7 @@ class LearningController:
         #same enumeration as for trainloader, but on test data now
         for batch in self.testloader:
             test_counter += 1
-            image_name = "test_image" + str(test_counter) + ".jpg"
+            image_name = "epoch" + str(epoch_index) + "_test_image" + str(test_counter) + ".jpg"
 
             #Get real data again, just like in learn()
             with torch.no_grad():
@@ -170,9 +186,9 @@ class LearningController:
             if test_counter % 10 == 0:
                 prediction = prediction.cpu()
                 predicted_img = prediction.data[0]
-                if not os.path.exists(os.path.join("result", "facades")):
-                    os.makedirs(os.path.join("result", "facades"))
-                img_util.save_tensor_as_image(predicted_img, "result/{}/{}".format("facades", image_name))
+                if not os.path.exists(os.path.join("result", "depth")):
+                    os.makedirs(os.path.join("result", "depth"))
+                img_util.save_tensor_as_image(predicted_img, "result/{}/{}".format("depth", image_name))
 
         average_psnr = psnr_sum / len(self.testloader)
         print("Average PSNR = {:.6f}".format(average_psnr))

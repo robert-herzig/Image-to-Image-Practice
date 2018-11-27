@@ -54,6 +54,9 @@ class DataManager(data.Dataset):
     def get_imgs_at_index(self, index):
         a = self.transform(PIL.Image.open(self.a_images[index]).resize((256, 256), PIL.Image.BICUBIC))
         b = self.transform(PIL.Image.open(self.b_images[index]).resize((256, 256), PIL.Image.BICUBIC))
+
+        # a = self.transform(PIL.Image.open(self.a_images[index]).resize((240, 320), PIL.Image.BICUBIC))
+        # b = self.transform(PIL.Image.open(self.b_images[index]).resize((240, 320), PIL.Image.BICUBIC))
         return a, b
 
     def __getitem__(self, index):
