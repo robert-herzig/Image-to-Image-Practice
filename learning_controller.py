@@ -15,6 +15,8 @@ import img_util
 
 from torch.utils import data
 
+from depth_pred_generator import GlobalNet, RefinementNet
+
 class LearningController:
     def __init__(self):
         print("INIT LEARNING CONTROLLER")
@@ -39,7 +41,8 @@ class LearningController:
             print("Successfully loaded G and D")
         else:
             #Create G and D, save them as class variables for later use (test etc)
-            self.G = generator_model.get_generator_model(3, 1, 8, use_gpu) #TODO: This 1 is for depth tests
+            # self.G = generator_model.get_generator_model(3, 1, 8, use_gpu) #TODO: This 1 is for depth tests
+            self.G = GlobalNet(3, 1)
             self.D = discriminator_model.get_discriminator_model(3 + 1, 8, use_gpu) #3 is for the condition (RGB) and
                                                                                     # +3 / +1 is for the output image
         #debugging output just for testing
@@ -84,6 +87,40 @@ class LearningController:
         #Transpose the a and b tensors to Variables to make them usable
         self.real_a = Variable(self.real_a)
         self.real_b = Variable(self.real_b)
+
+    def train_only_global_generator(self, use_gpu):
+        for iteration, batch in enumerate(self.trainloader, 1):
+            with torch.no_grad():
+                real_input, real_output = Variable(batch[0]), Variable(batch[1])
+                # real_input, real_output = Variable(train_a, train_b)
+                if use_gpu:
+                    real_input = real_input.cuda()
+                    real_output = real_output.cuda()
+
+            self.real_a = real_input.unsqueeze(0)  # should stay consistently at a/b or input/output
+            self.real_b = real_output.unsqueeze(0)
+
+            # let G generate the fake image
+            fake_b = self.G(self.real_a)
+
+            # Clear the gradients
+            self.optimizerG.zero_grad()
+
+            # Now for G -> get loss and do a step
+            # Get fake data from G and push it through D to get its prediction (real of fake)
+            fake_complete = torch.cat((self.real_a, fake_b), 1)
+
+            # Addition of l1 loss
+            loss_g_l1 = self.l1_loss(fake_b, self.real_b)# In the paper they recommend lambda = 100!
+
+            # get combined loss for G and do backprop + optimizer step
+            loss_g = loss_g_l1
+
+            loss_g.backward()
+            self.optimizerG.step()
+
+            print("STEP " + str(iteration) + "/" + str(len(self.trainloader)) + " G-LOSS: " + str(loss_g.data.item()))
+
 
     def learn(self, data_root, use_gpu,  load_models, load_path_G, load_path_D, num_epochs = 10, seed=9876):
         #We need to prepare our variables first. I do this in the prepare() method
