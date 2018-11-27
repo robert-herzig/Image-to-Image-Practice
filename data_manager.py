@@ -52,12 +52,13 @@ class DataManager(data.Dataset):
         return file_paths
 
     def get_imgs_at_index(self, index):
-        # a = self.transform(PIL.Image.open(self.a_images[index]).resize((256, 256), PIL.Image.BICUBIC))
-        # b = self.transform(PIL.Image.open(self.b_images[index]).resize((256, 256), PIL.Image.BICUBIC))
+        #TODO: Seems necessary in order to use halfing and doubling of the sizes properly
+        a = self.transform(PIL.Image.open(self.a_images[index]).resize((256, 256), PIL.Image.BICUBIC))
+        b = self.transform(PIL.Image.open(self.b_images[index]).resize((256, 256), PIL.Image.BICUBIC))
 
         #TODO: Probably, we don't need 256x256
-        a = self.transform(PIL.Image.open(self.a_images[index]))
-        b = self.transform(PIL.Image.open(self.b_images[index]))
+        # a = self.transform(PIL.Image.open(self.a_images[index]))
+        # b = self.transform(PIL.Image.open(self.b_images[index]))
 
         # a = self.transform(PIL.Image.open(self.a_images[index]).resize((240, 320), PIL.Image.BICUBIC))
         # b = self.transform(PIL.Image.open(self.b_images[index]).resize((240, 320), PIL.Image.BICUBIC))
