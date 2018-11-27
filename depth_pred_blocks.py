@@ -14,7 +14,8 @@ class EncoderBlock(nn.Module):
             nn.ReflectionPad2d(1),
             nn.Conv2d(num_channels_in, num_channels_out, 3, padding=0), #it doesn't specify this, right?
             nn.ReLU(inplace=True), #not really sure about inplace
-            nn.MaxPool2d(2, stride=2)
+            # nn.ReflectionPad2d(1),
+            nn.MaxPool2d(2, stride=2, ceil_mode=False)
         )
 
     def forward(self, x):
@@ -25,11 +26,11 @@ class DecoderBlock(nn.Module):
     def __init__(self, num_channels_in, num_channels_out):
         super(DecoderBlock, self).__init__()
 
-        self.up = nn.ConvTranspose2d(num_channels_in, num_channels_in // 2, 2, stride=2)
+        self.up = nn.ConvTranspose2d(num_channels_in, num_channels_out, 2, stride=2)
 
         self.conv = nn.Sequential(
-            nn.ReflectionPad2d(1),
-            nn.Conv2d(num_channels_in//2, num_channels_out, 3, padding=0), #it doesn't specify this, right?
+            # nn.ReflectionPad2d(1),
+            nn.Conv2d(num_channels_out, num_channels_out, 3, padding=1), #it doesn't specify this, right?
             nn.ReLU(inplace=True), #not really sure about inplace
         )
 

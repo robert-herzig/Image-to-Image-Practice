@@ -108,7 +108,7 @@ class LearningController:
 
             # Now for G -> get loss and do a step
             # Get fake data from G and push it through D to get its prediction (real of fake)
-            fake_complete = torch.cat((self.real_a, fake_b), 1)
+            # fake_complete = torch.cat((self.real_a, fake_b), 1)
 
             # Addition of l1 loss
             loss_g_l1 = self.l1_loss(fake_b, self.real_b)# In the paper they recommend lambda = 100!

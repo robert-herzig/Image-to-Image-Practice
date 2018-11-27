@@ -18,10 +18,18 @@ class GlobalNet(nn.Module):
 
         self.down1 = EncoderBlock(num_channels_in, 64)
         self.down2 = EncoderBlock(64, 128)
+        self.down3 = EncoderBlock(128, 256)
+        self.down4 = EncoderBlock(256, 512)
+        self.down5 = EncoderBlock(512, 1024)
+        self.down6 = EncoderBlock(1024, 1024)
 
-        self.up1 = DecoderBlock(128, 64)
-        self.up2 = DecoderBlock(64, 3)
-        self.up3 = UpsamplingBlock(3, 3)
+        self.up1 = DecoderBlock(1024, 512)
+        self.up2 = DecoderBlock(512, 256)
+        self.up3 = DecoderBlock(256, 128)
+        self.up4 = DecoderBlock(128, 64)
+        self.up5 = DecoderBlock(64, 3)
+        self.upsample = UpsamplingBlock(3, 3)
+
 
         self.out = OutconvBlock(3, num_channels_out)
 
@@ -45,12 +53,34 @@ class GlobalNet(nn.Module):
         # Down
         x1 = self.down1(x)
         x2 = self.down2(x1)
+        x3 = self.down3(x2)
+        x4 = self.down4(x3)
+        x5 = self.down5(x4)
 
-        x3 = self.up1(x2)
-        x4 = self.up2(x3)
-        x5 = self.up3(x4)
+        x6 = self.up1(x5)
+        x7 = self.up2(x6)
+        x8 = self.up3(x7)
+        x9 = self.up4(x8)
+        x10 = self.up5(x9)
+        x11 = self.upsample(x10)
 
-        output = self.out(x5)
+        output = self.out(x11)
+
+        # print("TENSOR SIZES: ")
+        # print(x.size())
+        # print(x1.size())
+        # print(x2.size())
+        # print(x3.size())
+        # print(x4.size())
+        # print(x5.size())
+        # print(x6.size())
+        # print(x7.size())
+        # print(x8.size())
+        # print(x9.size())
+        # print(x10.size())
+        # print(x11.size())
+        # print(output.size())
+
 
         return output
 
