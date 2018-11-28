@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from depth_pred_blocks import EncoderBlock, DecoderBlock, UpsamplingBlock, OutconvBlock
+from torchvision import models
 
 """
 For the encoder,
@@ -16,22 +17,31 @@ class GlobalNet(nn.Module):
     def __init__(self, num_channels_in, num_channels_out):
         super(GlobalNet, self).__init__()
 
-        self.down1 = EncoderBlock(num_channels_in, 64)
-        self.down2 = EncoderBlock(64, 128)
-        self.down3 = EncoderBlock(128, 256)
-        self.down4 = EncoderBlock(256, 512)
-        self.down5 = EncoderBlock(512, 1024)
-        self.down6 = EncoderBlock(1024, 1024)
+        self.vgg16 = models.vgg16(pretrained=True)
 
-        self.up1 = DecoderBlock(1024, 512)
-        self.up2 = DecoderBlock(512, 256)
-        self.up3 = DecoderBlock(256, 128)
-        self.up4 = DecoderBlock(128, 64)
-        self.up5 = DecoderBlock(64, 3)
-        self.upsample = UpsamplingBlock(3, 3)
+        self.encoder = nn.Sequential(
+            *list(self.vgg16.features.children())[:-3]
+        )
+        print(self.encoder)
+        self.decoder = nn.Sequential(
+            DecoderBlock(512, 256),
+            DecoderBlock(256, 128),
+            DecoderBlock(128, 64),
+            DecoderBlock(64, 3),
+            UpsamplingBlock(3, 3),
+            OutconvBlock(3, num_channels_out)
+        )
 
 
-        self.out = OutconvBlock(3, num_channels_out)
+        # # self.up1 = DecoderBlock(512, 512)
+        # self.up2 = DecoderBlock(512, 256)
+        # self.up3 = DecoderBlock(256, 128)
+        # self.up4 = DecoderBlock(128, 64)
+        # # self.up5 = DecoderBlock(64, 3)
+        # self.upsample = UpsamplingBlock(3, 3)
+        #
+        #
+        # self.out = OutconvBlock(3, num_channels_out)
 
         # self.inc = inconv_block(n_channels, 64)
         # self.down1 = down_block(64, 128)
@@ -50,21 +60,9 @@ class GlobalNet(nn.Module):
         # self.outc = outconv_block(64, n_classes)
 
     def forward(self, x):
-        # Down
-        x1 = self.down1(x)
-        x2 = self.down2(x1)
-        x3 = self.down3(x2)
-        x4 = self.down4(x3)
-        x5 = self.down5(x4)
+        x1 = self.encoder(x)
+        output = self.decoder(x1)
 
-        x6 = self.up1(x5)
-        x7 = self.up2(x6)
-        x8 = self.up3(x7)
-        x9 = self.up4(x8)
-        x10 = self.up5(x9)
-        x11 = self.upsample(x10)
-
-        output = self.out(x11)
 
         # print("TENSOR SIZES: ")
         # print(x.size())

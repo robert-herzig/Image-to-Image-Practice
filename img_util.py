@@ -19,7 +19,7 @@ def save_tensor_as_image(image_tensor, filename):
 
         print("saved" + filename)
     else:
-        img_array = img_array[:, :, 0] #For black-white imgs, we need a 2d matrix
+        # img_array = img_array[:, :, 0] #For black-white imgs, we need a 2d matrix
 
         img = Image.fromarray(img_array, mode='L')
         img.save(filename)

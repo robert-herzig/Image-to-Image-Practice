@@ -12,7 +12,7 @@ class MatReader:
     def __init__(self, path):
         print("WOW, READING MATS TIME?!")
         self.path = path
-        self.data = h5py.File('datasets/nyu_depth_v2_labeled.mat', 'r')
+        self.data = h5py.File('/home/rob/Documents/MasterThesis/GitCopy/Image-to-Image-Practice/datasets/nyu_depth_v2_labeled.mat', 'r')
 
     def read_mat(self):
         # with h5py.File('datasets/NYU2/nyu_depth_v2_labeled.mat', 'r') as f:
@@ -36,6 +36,18 @@ class MatReader:
         # im = Image.fromarray(im[:, :, :4])
         # im.save('test_hot.png')
         return im[:, :, :4]
+
+    def get_hot_bw(self, gray):
+        cm_hot = mpl.cm.get_cmap('Greys')
+        img_src = Image.fromarray(gray).convert('L')
+        # img_src = gray.convert('L')
+        # img_src.thumbnail((256, 512))
+        im = np.array(img_src) / 6
+        im = cm_hot(im)
+        im = np.uint8(im * 255)
+        # im = Image.fromarray(im[:, :, :4])
+        # im.save('test_hot.png')
+        return im
 
     def resize_image(self, img, wpercent):
         basewidth = 240
@@ -68,7 +80,7 @@ class MatReader:
 
 if __name__ == '__main__':
     convert_to_rgb = False
-    reader = MatReader("datasets/NYU2/nyu_depth_v2_labeled.mat")
+    reader = MatReader("/home/rob/Documents/MasterThesis/GitCopy/Image-to-Image-Practice/datasets/NYU2/nyu_depth_v2_labeled.mat")
     reader.read_mat()
     rgb_test = reader.get_index('images')
     depth_test = reader.get_index('depths')
@@ -123,6 +135,12 @@ if __name__ == '__main__':
                 depth_rgb = depth_rgb.convert('RGB')
                 depth_rgb.save("datasets/NYU2/" + train_or_test + "/b/" + str(i) + ".jpg")
             else:
-                depth_img.save("datasets/NYU2/" + train_or_test + "/b/" + str(i) + ".jpg")
+                depth_bw_test = np.array(depth_img)
+                pseudo_colored_depth = reader.get_hot_bw(single_depth)
+                depth_rgb = Image.fromarray(pseudo_colored_depth)
+                depth_rgb = reader.resize_image(depth_rgb, 240)
+                depth_rgb = depth_rgb.convert('L')
+                depth_rgb.save("datasets/NYU2/" + train_or_test + "/b/" + str(i) + ".jpg")
+                # depth_img.save("datasets/NYU2/" + train_or_test + "/b/" + str(i) + ".jpg")
 
 
