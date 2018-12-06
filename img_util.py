@@ -2,6 +2,7 @@ import numpy as np
 from PIL import Image
 import torchvision.transforms.functional as F
 import torchvision.utils
+import cv2
 # import png
 # import skimage.io
 #atm just for saving the image but could use it for loading etc as well
@@ -21,9 +22,12 @@ def save_tensor_as_image(image_tensor, filename):
         img = Image.fromarray(img_array)
         img.save(filename)
 
-        print("saved" + filename)
+        print("SAVED (RGB) " + filename)
     else:
         img_array = img_array[:, :, 0] #For black-white imgs, we need a 2d matrix
+        # print(np.amax(img_array))
+        # print(np.amin(img_array))
+        cv2.imwrite(filename, img_array)
         #
         # img = Image.fromarray(img_array, mode='L')
         # img.save(filename)
@@ -34,4 +38,4 @@ def save_tensor_as_image(image_tensor, filename):
         #skimage.io.imsave(filename, img_array)
         # png.fromarray(img_array, 'L').save(filename)
 
-        print("SAVED " + filename)
+        print("SAVED (BW) " + filename)

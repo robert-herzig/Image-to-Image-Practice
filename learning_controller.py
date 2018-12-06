@@ -57,7 +57,7 @@ class LearningController:
         self.trainloader = data_manager.DataManager(data_root, train=True)
         self.testloader = data_manager.DataManager(data_root, train=False)
 
-        self.train_generator = data.DataLoader(self.trainloader, batch_size=8, shuffle=True, num_workers=0)
+        self.train_generator = data.DataLoader(self.trainloader, batch_size=32, shuffle=True, num_workers=0)
         self.test_generator = data.DataLoader(self.testloader, batch_size=8, shuffle=True, num_workers=0)
 
         print("AMOUNT OF IMAGES FOR TRAINING: " + str(len(self.trainloader)))
@@ -103,37 +103,40 @@ class LearningController:
         #     print(a)
         #     print(b)
 
-        for iteration, batch in enumerate(self.trainloader, 1):
-            with torch.no_grad():
-                real_input, real_output = Variable(batch[0]), Variable(batch[1])
-                # real_input, real_output = Variable(train_a, train_b)
-                if use_gpu:
-                    real_input = real_input.cuda()
-                    real_output = real_output.cuda()
+        for iteration, data in enumerate(self.train_generator, 0):
+            a_images, b_images = data
+            print("BATCH " + str(iteration+1) + "/" + str(len(self.train_generator)))
+            for i in range(0, len(a_images)):
+                with torch.no_grad():
+                    real_input, real_output = Variable(a_images[i]), Variable(b_images[i])
+                    # real_input, real_output = Variable(train_a, train_b)
+                    if use_gpu:
+                        real_input = real_input.cuda()
+                        real_output = real_output.cuda()
 
-            self.real_a = real_input.unsqueeze(0)  # should stay consistently at a/b or input/output
-            self.real_b = real_output.unsqueeze(0)
+                self.real_a = real_input.unsqueeze(0)  # should stay consistently at a/b or input/output
+                self.real_b = real_output.unsqueeze(0)
 
-            # let G generate the fake image
-            fake_b = self.G(self.real_a)
+                # let G generate the fake image
+                fake_b = self.G(self.real_a)
 
-            # Clear the gradients
-            self.optimizerG.zero_grad()
+                # Clear the gradients
+                self.optimizerG.zero_grad()
 
-            # Now for G -> get loss and do a step
-            # Get fake data from G and push it through D to get its prediction (real of fake)
-            # fake_complete = torch.cat((self.real_a, fake_b), 1)
+                # Now for G -> get loss and do a step
+                # Get fake data from G and push it through D to get its prediction (real of fake)
+                # fake_complete = torch.cat((self.real_a, fake_b), 1)
 
-            # Addition of l1 loss
-            loss_g_l1 = self.l1_loss(fake_b, self.real_b)# In the paper they recommend lambda = 100!
+                # Addition of l1 loss
+                loss_g_l1 = self.l1_loss(fake_b, self.real_b)# In the paper they recommend lambda = 100!
 
-            # get combined loss for G and do backprop + optimizer step
-            loss_g = loss_g_l1
+                # get combined loss for G and do backprop + optimizer step
+                loss_g = loss_g_l1
 
-            loss_g.backward()
-            self.optimizerG.step()
+                loss_g.backward()
+                self.optimizerG.step()
 
-            print("STEP " + str(iteration) + "/" + str(len(self.trainloader)) + " G-LOSS: " + str(loss_g.data.item()))
+                print("STEP " + str(i+1) + "/" + str(len(a_images)) + " G-LOSS: " + str(loss_g.data.item()))
 
 
     def learn(self, data_root, use_gpu,  load_models, load_path_G, load_path_D, num_epochs = 10, seed=9876):

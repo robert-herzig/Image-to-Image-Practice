@@ -6,6 +6,9 @@ import torchvision.transforms as transforms
 
 import torch.utils.data as data
 
+import cv2
+import numpy as np
+
 #This class will be used to load data from the specified folder and
 # retrieve it using the index. Maybe get an elegant method for iterating
 # through it without having to load it all at once (see Generators from TF)
@@ -64,11 +67,27 @@ class DataManager(data.Dataset):
         # a_img = PIL.Image.open(self.a_images[index]).resize((320, 240), PIL.Image.BICUBIC)
         # b_img = PIL.Image.open(self.b_images[index]).resize((320, 240), PIL.Image.BICUBIC)
 
-        a_img = PIL.Image.open(self.a_images[index]).resize((480, 360), PIL.Image.BICUBIC)
-        b_img = PIL.Image.open(self.b_images[index]).resize((480, 360), PIL.Image.BICUBIC)
+        a_img = cv2.imread(self.a_images[index])
+        b_img = cv2.imread(self.b_images[index], 0) #If we want RGB output, the second param should be 1 or empty
 
-        a_img = a_img.crop((30, 30, 286, 286))
-        b_img = b_img.crop((30, 30, 286, 286))
+        a_img = cv2.resize(a_img, (0, 0), fx=0.75, fy=0.75)
+        b_img = cv2.resize(b_img, (0, 0), fx=0.75, fy=0.75)
+
+        print("IMAGE SHAPES:")
+        print(a_img.shape)
+        a_img = a_img[30:286, 30:286]
+        a_img = a_img[..., ::-1] #convert BGR (cv2) to RGB (what we want later)
+        a_img = a_img.copy() #remove negative strides
+
+        b_img = b_img[30:286, 30:286]
+        b_img = b_img[:, :, np.newaxis] #add the extra axis so we can work with this as we do with rgb -> less code
+
+        print(a_img.shape)
+        # a_img = PIL.Image.open(self.a_images[index]).resize((480, 360), PIL.Image.BICUBIC)
+        # b_img = PIL.Image.open(self.b_images[index]).resize((480, 360), PIL.Image.BICUBIC)
+
+        # a_img = a_img.crop((30, 30, 286, 286))
+        # b_img = b_img.crop((30, 30, 286, 286))
 
         a = self.transform(a_img)
         b = self.transform(b_img)
