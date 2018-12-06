@@ -40,25 +40,43 @@ class DataManager(data.Dataset):
         print("TRAIN A B:")
         self.a_images = self.get_all_imgs_in_folder(self.a_path)
         self.b_images = self.get_all_imgs_in_folder(self.b_path)
+        # print(self.a_images)
+        # print(self.b_images)
 
     #TODO: Just use a list of file endings maybe for cleaner code
     def get_all_imgs_in_folder(self, folder):
         file_paths = []
+        # print("GET IMAGES IN " + folder)
         for file in listdir(folder):
-            if file.endswith(".jpg") or file.endswith(".jpeg" or file.endswith(".png")
-                                     or file.endswith(".JPG") or file.endswith(".JPEG")
-                                     or file.endswith(".PNG")):
-                    file_paths.append(join(folder, file))
+            # print(file)
+            # if file.endswith(".jpg") or file.endswith(".jpeg" or file.endswith(".png")
+            #                          or file.endswith(".JPG") or file.endswith(".JPEG")
+            #                          or file.endswith(".PNG")):
+            #         print("SAVE FILE " + str(join(folder, file)))
+            #         file_paths.append(join(folder, file))
+            if file.__contains__(".png"):
+                file_paths.append(join(folder, file))
+        # print(file_paths)
         return file_paths
 
     def get_imgs_at_index(self, index):
         #TODO: Seems necessary in order to use halfing and doubling of the sizes properly
-        a = self.transform(PIL.Image.open(self.a_images[index]).resize((256, 256), PIL.Image.BICUBIC))
-        b = self.transform(PIL.Image.open(self.b_images[index]).resize((256, 256), PIL.Image.BICUBIC))
+        # a_img = PIL.Image.open(self.a_images[index]).resize((320, 240), PIL.Image.BICUBIC)
+        # b_img = PIL.Image.open(self.b_images[index]).resize((320, 240), PIL.Image.BICUBIC)
+
+        a_img = PIL.Image.open(self.a_images[index]).resize((480, 360), PIL.Image.BICUBIC)
+        b_img = PIL.Image.open(self.b_images[index]).resize((480, 360), PIL.Image.BICUBIC)
+
+        a_img = a_img.crop((30, 30, 286, 286))
+        b_img = b_img.crop((30, 30, 286, 286))
+
+        a = self.transform(a_img)
+        b = self.transform(b_img)
+
 
         #TODO: Probably, we don't need 256x256
-        # a = self.transform(PIL.Image.open(self.a_images[index]))
-        # b = self.transform(PIL.Image.open(self.b_images[index]))
+        # a = self.transform(PIL.Image.open(self.a_images[index]).crop((8, 48, 232, 272)))
+        # b = self.transform(PIL.Image.open(self.b_images[index]).crop((8, 48, 232, 272)))
 
         # a = self.transform(PIL.Image.open(self.a_images[index]).resize((240, 320), PIL.Image.BICUBIC))
         # b = self.transform(PIL.Image.open(self.b_images[index]).resize((240, 320), PIL.Image.BICUBIC))

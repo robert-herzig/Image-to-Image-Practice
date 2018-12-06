@@ -1,8 +1,21 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from depth_pred_blocks import EncoderBlock, DecoderBlock, UpsamplingBlock, OutconvBlock
+from depth_pred_blocks import EncoderBlock, DecoderBlock, UpsamplingBlock, OutconvBlock, FeatureBlock, ResidualRefinementBlock, RefinementBlock
 from torchvision import models
+
+class CompleteGenerator(nn.Module):
+    def __init__(self, num_channels_in, num_channels_out):
+        super(CompleteGenerator, self).__init__()
+
+        self.glob = GlobalNet(num_channels_in, num_channels_out)
+        # self.ref = RefinementNet(num_channels_in, num_channels_out)
+
+    def forward(self, x):
+        x_glob = self.glob(x)
+        # x_ref = self.ref(x, x_glob)
+
+        return x_glob
 
 """
 For the encoder,
@@ -17,68 +30,47 @@ class GlobalNet(nn.Module):
     def __init__(self, num_channels_in, num_channels_out):
         super(GlobalNet, self).__init__()
 
-        self.vgg16 = models.vgg16(pretrained=True)
+        self.vgg16 = models.vgg16()
+        # self.vgg16.load_state_dict(torch.load("vgg16-397923af.pth"))
 
         self.encoder = nn.Sequential(
-            *list(self.vgg16.features.children())[:-3]
+            *list(self.vgg16.features.children())[:-2]
         )
-        print(self.encoder)
+
+        self.encoder = nn.Sequential(
+            self.encoder,
+            # EncoderBlock(num_channels_in, 64),
+            # EncoderBlock(64, 128),
+            # EncoderBlock(128, 256),
+            # EncoderBlock(256, 512),
+            EncoderBlock(512, 512),
+            # EncoderBlock(512, 1024)
+        )
+        # # print(self.encoder)
+        # self.encoder = nn.Sequential(
+        #     self.encoder,
+        #     EncoderBlock(512, 1024)
+        # )
+
         self.decoder = nn.Sequential(
+            # DecoderBlock(1024, 512),
+            DecoderBlock(512, 512),
             DecoderBlock(512, 256),
             DecoderBlock(256, 128),
-            DecoderBlock(128, 64),
-            DecoderBlock(64, 3),
-            UpsamplingBlock(3, 3),
-            OutconvBlock(3, num_channels_out)
+            DecoderBlock(128, num_channels_out),
+            # DecoderBlock(64, num_channels_out),
+            UpsamplingBlock(num_channels_out, num_channels_out),
+            # OutconvBlock(num_channels_out, num_channels_out)
         )
-
-
-        # # self.up1 = DecoderBlock(512, 512)
-        # self.up2 = DecoderBlock(512, 256)
-        # self.up3 = DecoderBlock(256, 128)
-        # self.up4 = DecoderBlock(128, 64)
-        # # self.up5 = DecoderBlock(64, 3)
-        # self.upsample = UpsamplingBlock(3, 3)
-        #
-        #
-        # self.out = OutconvBlock(3, num_channels_out)
-
-        # self.inc = inconv_block(n_channels, 64)
-        # self.down1 = down_block(64, 128)
-        # self.down2 = down_block(128, 256)
-        # self.down3 = down_block(256, 512)
-        # self.down4 = down_block(512, 512)
-        # # self.down5 = down_block(512, 512)
-        # # self.down6 = down_block(512, 512)
-        #
-        # # self.up1 = up_block(1024, 512)
-        # # self.up2 = up_block(1024, 512)
-        # self.up3 = up_block(1024, 256)
-        # self.up4 = up_block(512, 128)
-        # self.up5 = up_block(256, 64)
-        # self.up6 = up_block(128, 64)
-        # self.outc = outconv_block(64, n_classes)
 
     def forward(self, x):
         x1 = self.encoder(x)
+        # print("AFTER ENCODER:")
+        # print(summary(self.encoder, (3, 256, 256)))
+        #
+        # print("AFTER DECODER:")
+        # print(summary(self.decoder, (512, 8, 8)))
         output = self.decoder(x1)
-
-
-        # print("TENSOR SIZES: ")
-        # print(x.size())
-        # print(x1.size())
-        # print(x2.size())
-        # print(x3.size())
-        # print(x4.size())
-        # print(x5.size())
-        # print(x6.size())
-        # print(x7.size())
-        # print(x8.size())
-        # print(x9.size())
-        # print(x10.size())
-        # print(x11.size())
-        # print(output.size())
-
 
         return output
 
@@ -90,6 +82,37 @@ tural guidance into the refinement net, a feature map 2 from
 RGB input is concatenated with the third convolutional layer
 of refinement net
 """
-class RefinementNet:
-    def __init__(self):
+class RefinementNet(nn.Module):
+    def __init__(self, num_channels_in, num_channels_out):
+        super(RefinementNet, self).__init__()
         print("REFINEMENT NET IS ALSO GOOD")
+
+        self.feature_map_net = nn.Sequential(
+            FeatureBlock(num_channels_in, num_channels_in),
+            FeatureBlock(num_channels_in, num_channels_in),
+            FeatureBlock(num_channels_in, num_channels_out)
+        )
+
+        #This can already be grayscale
+        self.refinement_net1 = nn.Sequential(
+            RefinementBlock(num_channels_out, num_channels_out),
+            RefinementBlock(num_channels_out, num_channels_out)
+        )
+
+        self.refinement_net2 = ResidualRefinementBlock(num_channels_in + num_channels_out, num_channels_out)
+
+        self.refinement_net3 = nn.Sequential(
+            RefinementBlock(num_channels_out, num_channels_out),
+            RefinementBlock(num_channels_out, num_channels_out),
+            OutconvBlock(num_channels_out, num_channels_out)
+        )
+
+    def forward(self, x_rgb, x_global):
+        # print(x.size())
+        feature_x = self.feature_map_net(x_rgb)
+        refinement1_x = self.refinement_net1(x_global)
+
+        refinement2_x = self.refinement_net2(refinement1_x, feature_x)
+        refinement3_x = self.refinement_net3(refinement2_x)
+
+        return refinement3_x

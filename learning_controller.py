@@ -15,7 +15,7 @@ import img_util
 
 from torch.utils import data
 
-from depth_pred_generator import GlobalNet, RefinementNet
+from depth_pred_generator import GlobalNet, RefinementNet, CompleteGenerator
 
 class LearningController:
     def __init__(self):
@@ -42,7 +42,11 @@ class LearningController:
         else:
             #Create G and D, save them as class variables for later use (test etc)
             # self.G = generator_model.get_generator_model(3, 1, 8, use_gpu) #TODO: This 1 is for depth tests
-            self.G = GlobalNet(3, 1)
+            self.G = CompleteGenerator(3, 1)
+            # self.G = nn.Sequential(
+            #     # GlobalNet(3, 1),
+            #     RefinementNet(3, 1)
+            # )
             self.D = discriminator_model.get_discriminator_model(3 + 1, 8, use_gpu) #3 is for the condition (RGB) and
                                                                                     # +3 / +1 is for the output image
         #debugging output just for testing
@@ -53,8 +57,11 @@ class LearningController:
         self.trainloader = data_manager.DataManager(data_root, train=True)
         self.testloader = data_manager.DataManager(data_root, train=False)
 
-        self.train_data_generator = data.DataLoader(self.trainloader, batch_size=32)
-        self.test_data_generator = data.DataLoader(self.testloader, batch_size=32)
+        self.train_generator = data.DataLoader(self.trainloader, batch_size=8, shuffle=True, num_workers=0)
+        self.test_generator = data.DataLoader(self.testloader, batch_size=8, shuffle=True, num_workers=0)
+
+        print("AMOUNT OF IMAGES FOR TRAINING: " + str(len(self.trainloader)))
+        print("AMOUNT OF IMAGES FOR TESTING: " + str(len(self.testloader)))
 
         #the loss functions
         #overall objective should be: arg min max LcGAN(G, D) + lambda*L1_loss(G)
@@ -89,6 +96,13 @@ class LearningController:
         self.real_b = Variable(self.real_b)
 
     def train_only_global_generator(self, use_gpu):
+        self.optimizerG = optim.SGD(self.G.parameters(), lr=0.01)
+
+        # for iteration, data in enumerate(self.train_generator, 0):
+        #     a, b = data
+        #     print(a)
+        #     print(b)
+
         for iteration, batch in enumerate(self.trainloader, 1):
             with torch.no_grad():
                 real_input, real_output = Variable(batch[0]), Variable(batch[1])
@@ -197,7 +211,9 @@ class LearningController:
         #same enumeration as for trainloader, but on test data now
         for batch in self.testloader:
             test_counter += 1
-            image_name = "epoch" + str(epoch_index) + "_test_image" + str(test_counter) + ".jpg"
+            image_name = "epoch" + str(epoch_index) + "_test_image" + str(test_counter) + ".png"
+            image_name_input = "test_image" + str(test_counter) + "_INPUT.png"
+            image_name_target = "test_image" + str(test_counter) + "_TARGET.png"
 
             #Get real data again, just like in learn()
             with torch.no_grad():
@@ -220,12 +236,14 @@ class LearningController:
                 continue
 
             # Generate an image, this is not necessary all the time
-            if test_counter % 10 == 0:
+            if test_counter % 1 == 0:
                 prediction = prediction.cpu()
                 predicted_img = prediction.data[0]
                 if not os.path.exists(os.path.join("result", "depth")):
                     os.makedirs(os.path.join("result", "depth"))
                 img_util.save_tensor_as_image(predicted_img, "result/{}/{}".format("depth", image_name))
+                img_util.save_tensor_as_image(input.data[0], "result/{}/{}".format("depth", image_name_input))
+                img_util.save_tensor_as_image(target.data[0], "result/{}/{}".format("depth", image_name_target))
 
         average_psnr = psnr_sum / len(self.testloader)
         print("Average PSNR = {:.6f}".format(average_psnr))
@@ -240,9 +258,13 @@ class LearningController:
             os.mkdir(os.path.join("checkpoint", "Test1"))
 
         #Save G and D into separate pth-files
-        net_g_model_out_path = "checkpoint/{}/netG_model_epoch_{}.pth".format("Test1", epoch)
-        net_d_model_out_path = "checkpoint/{}/netD_model_epoch_{}.pth".format("Test1", epoch)
+        # net_g_model_out_path = "checkpoint/{}/netG_model_epoch_{}.pth".format("Test1", epoch)
+        # net_d_model_out_path = "checkpoint/{}/netD_model_epoch_{}.pth".format("Test1", epoch)
+
+
+        net_g_model_out_path = "checkpoint/{}/netG_model.pth".format("Test1")
+        net_d_model_out_path = "checkpoint/{}/netD_model.pth".format("Test1")
         torch.save(self.G, net_g_model_out_path)
         torch.save(self.D, net_d_model_out_path)
 
-        print("Checkpoint saved to {}".format("checkpoint" + "Test1"))
+        print("Checkpoint saved to {}".format("checkpoint/" + "Test1"))

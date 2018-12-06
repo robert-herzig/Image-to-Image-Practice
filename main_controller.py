@@ -29,10 +29,10 @@ class Main:
             if epoch % 10 == 0:
                 self.learning_controller.checkpoint(epoch)
 
-            if epoch % 5 == 0:
+            if epoch % 1 == 0:
                 self.learning_controller.test(True, epoch)
 
 if __name__ == '__main__':
     main_controller = Main()
-    # main_controller.test("datasets/NYU2", 500, True, "checkpoint/Test1/netG_model_epoch_10.pth", "checkpoint/Test1/netD_model_epoch_10.pth")
-    main_controller.train_only_global_generator("datasets/NYU2", 30, False, "checkpoint/Test1/netG_model_epoch_10.pth", "checkpoint/Test1/netD_model_epoch_10.pth")
+    #main_controller.test("datasets/NYU2", 500, True, "checkpoint/Test1/netG_model_epoch_10.pth", "checkpoint/Test1/netD_model_epoch_10.pth")
+    main_controller.train_only_global_generator("datasets/NYU2", 1, False, "checkpoint/Test1/netG_model_epoch_10.pth", "checkpoint/Test1/netD_model_epoch_10.pth")
