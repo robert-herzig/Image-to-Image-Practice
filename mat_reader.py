@@ -60,6 +60,9 @@ class MatReader:
         img = img.resize((basewidth, hsize), Image.ANTIALIAS)
         return img
 
+    def remove_zeros_from_image(self, img):
+        img[img == 0] = 255
+
     def convert_whole_bw_folder_to_hot(self, folder):
 
         for file in listdir(folder):
@@ -91,10 +94,12 @@ if __name__ == '__main__':
             train_or_test = "test"
         single_rgb = rgb_test[i]
         single_depth = depth_test[i]
+
         # single_depth = np.array(single_depth)
 
         single_rgb = np.moveaxis(single_rgb, -1, 0)
         single_rgb = np.moveaxis(single_rgb, -1, 0)
+
 
         img_rgb = Image.fromarray(single_rgb)
         img_rgb = img_rgb.rotate(270, expand=1)
@@ -106,6 +111,7 @@ if __name__ == '__main__':
         im = np.array(single_depth) / 7
         im = np.clip(im, 0, 1)
         im = np.uint8(im * 255)
+
         im = np.rot90(im)
         im = np.rot90(im)
         im = np.rot90(im)

@@ -17,13 +17,19 @@ from torch.utils import data
 
 from depth_pred_generator import GlobalNet, RefinementNet, CompleteGenerator
 
+import csv
+import datetime
+from csv_plotter import CSVPlotter
+
+#TODO: Add time check
+
 class LearningController:
-    def __init__(self):
+    def __init__(self, use_Jung = True): #if use_Jung is True, then we load its D and G instead of pix2pix
         print("INIT LEARNING CONTROLLER")
         self.cur_index = 0
+        self.use_Jung = use_Jung
 
-
-    def prepare(self, data_root, use_gpu, load_models, load_path_G, load_path_D, seed=9876):
+    def prepare(self, data_root, use_gpu, load_models, use_discriminator, load_path_G, load_path_D, seed=9876):
         # PREPARATION BEFORE LEARNING CAN BEGIN!
         ####################################################
         if use_gpu and not torch.cuda.is_available():
@@ -34,31 +40,32 @@ class LearningController:
         if use_gpu:
             torch.cuda.manual_seed(seed)
 
+        #For the first tests, only load the generator
         if load_models and os.path.isfile(load_path_G) and os.path.isfile(load_path_D):
             print("LOAD")
             self.G = torch.load(load_path_G)
-            self.D = torch.load(load_path_D)
+            if not self.use_Jung:
+                self.D = torch.load(load_path_D)
+            else:
+                self.D = discriminator_model.get_discriminator_model_Jung(use_gpu=True)
             print("Successfully loaded G and D")
         else:
-            #Create G and D, save them as class variables for later use (test etc)
-            # self.G = generator_model.get_generator_model(3, 1, 8, use_gpu) #TODO: This 1 is for depth tests
             self.G = CompleteGenerator(3, 1)
-            # self.G = nn.Sequential(
-            #     # GlobalNet(3, 1),
-            #     RefinementNet(3, 1)
-            # )
-            self.D = discriminator_model.get_discriminator_model(3 + 1, 8, use_gpu) #3 is for the condition (RGB) and
+            if self.use_Jung:
+                self.D = discriminator_model.get_discriminator_model_Jung(use_gpu=True)
+            else:
+                self.D = discriminator_model.get_discriminator_model(3 + 1, 8, use_gpu) #3 is for the condition (RGB) and
                                                                                     # +3 / +1 is for the output image
         #debugging output just for testing
         print_network(self.G)
         print_network(self.D)
 
         #data managers using the torch data util methods
-        self.trainloader = data_manager.DataManager(data_root, train=True)
-        self.testloader = data_manager.DataManager(data_root, train=False)
+        self.trainloader = data_manager.DataManager(data_root, train=True, use_small_patches=use_discriminator)
+        self.testloader = data_manager.DataManager(data_root, train=False, use_small_patches=use_discriminator)
 
-        self.train_generator = data.DataLoader(self.trainloader, batch_size=32, shuffle=True, num_workers=0)
-        self.test_generator = data.DataLoader(self.testloader, batch_size=8, shuffle=True, num_workers=0)
+        self.train_generator = data.DataLoader(self.trainloader, batch_size=1, shuffle=True, num_workers=0)
+        self.test_generator = data.DataLoader(self.testloader, batch_size=1, shuffle=True, num_workers=0)
 
         print("AMOUNT OF IMAGES FOR TRAINING: " + str(len(self.trainloader)))
         print("AMOUNT OF IMAGES FOR TESTING: " + str(len(self.testloader)))
@@ -95,8 +102,26 @@ class LearningController:
         self.real_a = Variable(self.real_a)
         self.real_b = Variable(self.real_b)
 
+        #Logging
+        now = datetime.datetime.now()
+        timestring = "log_" + str(now.month) + "_" + str(now.day) + "_" + str(now.hour) + "_" + str(now.minute)
+        timestring = timestring + "_" + str(now.second)
+        print(timestring)
+        if not os.path.exists(os.path.join("result", "logs")):
+            os.makedirs(os.path.join("result", "logs"))
+
+        self.csv_logfile = os.path.join("result", "logs", timestring + ".csv")
+        print(self.csv_logfile)
+        self.plotter = CSVPlotter(self.csv_logfile, os.path.join("result", "logs", timestring + ".png"))
+
+
     def train_only_global_generator(self, use_gpu):
-        self.optimizerG = optim.SGD(self.G.parameters(), lr=0.01)
+        self.optimizerG = optim.SGD(self.G.parameters(), lr=0.004, momentum=0.9)
+
+        #TODO:
+        # Change loss so network doesn't predict zeros:
+        # supervise to the ground truth value
+
 
         # for iteration, data in enumerate(self.train_generator, 0):
         #     a, b = data
@@ -128,6 +153,7 @@ class LearningController:
                 # fake_complete = torch.cat((self.real_a, fake_b), 1)
 
                 # Addition of l1 loss
+                fake_b = fake_b * (self.real_b > 0).float() #only supervise non-zero
                 loss_g_l1 = self.l1_loss(fake_b, self.real_b)# In the paper they recommend lambda = 100!
 
                 # get combined loss for G and do backprop + optimizer step
@@ -137,6 +163,12 @@ class LearningController:
                 self.optimizerG.step()
 
                 print("STEP " + str(i+1) + "/" + str(len(a_images)) + " G-LOSS: " + str(loss_g.data.item()))
+
+        with open(self.csv_logfile, 'a', newline='') as csvfile:
+            spamwriter = csv.writer(csvfile, delimiter=',',
+                                    quotechar='|', quoting=csv.QUOTE_MINIMAL)
+            spamwriter.writerow([loss_g.data.item()])
+        # self.plotter.plot_csv_to_image()
 
 
     def learn(self, data_root, use_gpu,  load_models, load_path_G, load_path_D, num_epochs = 10, seed=9876):
@@ -148,63 +180,90 @@ class LearningController:
         # enumerate through the trainloader - thanks torch.utils.data, great job!
         #TODO: Use batches properly!
         # iteration = 0
-        for iteration, batch in enumerate(self.trainloader, 1):
-            # for train_a, train_b in self.train_data_generator:
-            # real_input_cpu, real_output_cpu = batch[0], batch[1] #retrieve a and b from our loader
-            #TODO: Do I have to put torch.no_grad() around much more or only this block?
-            with torch.no_grad():
-                real_input, real_output = Variable(batch[0]), Variable(batch[1])
-                # real_input, real_output = Variable(train_a, train_b)
-                if use_gpu:
-                    real_input = real_input.cuda()
-                    real_output = real_output.cuda()
+        self.optimizerG = optim.SGD(self.G.parameters(), lr=0.001)
+        self.optimizerD = optim.SGD(self.D.parameters(), lr=0.001)
 
-            self.real_a = real_input.unsqueeze(0) #should stay consistently at a/b or input/output
-            self.real_b = real_output.unsqueeze(0)
+        for iteration, data in enumerate(self.train_generator, 0):
+            a_images, b_images = data
+            print("BATCH " + str(iteration+1) + "/" + str(len(self.train_generator)))
+            for i in range(0, len(a_images)):
 
-            #let G generate the fake image
-            fake_b = self.G(self.real_a)
+                with torch.no_grad():
+                    real_input, real_output = Variable(a_images[i]), Variable(b_images[i])
+                    # real_input, real_output = Variable(train_a, train_b)
+                    if use_gpu:
+                        real_input = real_input.cuda()
+                        real_output = real_output.cuda()
 
-            #Clear the gradients
-            self.optimizerD.zero_grad()
-            self.optimizerG.zero_grad()
+                self.real_a = real_input.unsqueeze(0) #should stay consistently at a/b or input/output
+                self.real_b = real_output.unsqueeze(0)
 
-            #fake_complete is concatenation of real input and the fake (generated) output
-            #The Discriminator is also conditioned on real a
-            fake_complete = torch.cat((self.real_a, fake_b), 1)
-            #pred_fake is then the prediction of the discriminator on the fake output
-            pred_fake = self.D.forward(fake_complete.detach())
-            #this is the normal gan-loss on D's prediction
-            loss_d_fake = self.gan_loss(pred_fake, False)
+                #let G generate the fake image
+                fake_b = self.G(self.real_a)
 
-            #do the same as before but with the real output
-            real_complete = torch.cat((self.real_a, self.real_b), 1)
-            pred_real = self.D.forward(real_complete)
-            loss_d_real = self.gan_loss(pred_real, True)
+                # Do the same with discriminator as with L1 earlier here
+                # -> don't learn zero spots!
+                # Addition of l1 loss
+                fake_b = fake_b * (self.real_b > 0).float()  # only supervise non-zero
 
-            #Get loss for D and do a step here
-            loss_d = (loss_d_fake + loss_d_real) / 2
-            #backprop
-            loss_d.backward()
-            self.optimizerD.step()
+                fake_b = fake_b.cuda()
+                #Clear the gradients
+                self.optimizerD.zero_grad()
+                self.optimizerG.zero_grad()
 
-            #Now for G -> get loss and do a step
-            #Get fake data from G and push it through D to get its prediction (real of fake)
-            fake_complete = torch.cat((self.real_a, fake_b), 1)
-            pred_fake = self.D.forward(fake_complete)
-            loss_g_gan = self.gan_loss(pred_fake, True)
+                if self.use_Jung:
+                    print("USE JUNG DISCRIMINATOR")
+                    pred_fake = self.D.forward(self.real_a, fake_b)
+                    loss_d_fake = self.gan_loss(pred_fake, False)
 
-            # Addition of l1 loss
-            loss_g_l1 = self.l1_loss(fake_b, self.real_b) * 2 #In the paper they recommend lambda = 100!
+                    pred_real = self.D.forward(self.real_a, self.real_b)
+                    loss_d_real = self.gan_loss(pred_real, True)
+                else:
+                    #fake_complete is concatenation of real input and the fake (generated) output
+                    #The Discriminator is also conditioned on real a
+                    fake_complete = torch.cat((self.real_a, fake_b), 1)
+                    #pred_fake is then the prediction of the discriminator on the fake output
+                    pred_fake = self.D.forward(fake_complete.detach())
+                    #this is the normal gan-loss on D's prediction
+                    loss_d_fake = self.gan_loss(pred_fake, False)
 
-            # get combined loss for G and do backprop + optimizer step
-            loss_g = loss_g_gan + loss_g_l1
-            print("LOSS G CONSISTING OF GAN: " + str(loss_g_gan.data.item()) + " L1: " + str(loss_g_l1.data.item()))
-            loss_g.backward()
-            self.optimizerG.step()
+                    #do the same as before but with the real output
+                    real_complete = torch.cat((self.real_a, self.real_b), 1)
+                    pred_real = self.D.forward(real_complete)
+                    loss_d_real = self.gan_loss(pred_real, True)
 
-            print("STEP " + str(iteration) + "/" + str(len(self.trainloader)) + ": D-LOSS: " + str(loss_d.data.item()) +
-                  " G-LOSS: " + str(loss_g.data.item()))
+                loss_d_fake = loss_d_fake.cuda()
+                loss_d_real = loss_d_real.cuda()
+
+                #Get loss for D and do a step here
+                loss_d = (loss_d_fake + loss_d_real) / 2
+
+                #backprop
+                loss_d.backward(retain_graph=True)
+                self.optimizerD.step()
+
+                #Now for G -> get loss and do a step
+                #Get fake data from G and push it through D to get its prediction (real of fake)
+                loss_g_gan = self.gan_loss(pred_fake, True) * 1
+
+                # Addition of l1 loss
+                loss_g_l1 = self.l1_loss(fake_b, self.real_b) * 10 #In the paper they recommend lambda = 100!
+
+                # get combined loss for G and do backprop + optimizer step
+                loss_g = loss_g_gan + loss_g_l1
+                print("LOSS G CONSISTING OF GAN: " + str(loss_g_gan.data.item()) + " AND L1: " + str(loss_g_l1.data.item()))
+                loss_g.backward()
+                self.optimizerG.step()
+
+                print("STEP " + str(iteration) + "/" + str(len(self.trainloader)) + ": D-LOSS: "
+                      + str(loss_d.data.item()) +
+                      " G-LOSS: " + str(loss_g.data.item()))
+
+        with open(self.csv_logfile, 'a', newline='') as csvfile:
+            spamwriter = csv.writer(csvfile, delimiter=',',
+                                    quotechar='|', quoting=csv.QUOTE_MINIMAL)
+            spamwriter.writerow([loss_g.data.item()])
+
 
     def test(self, use_gpu, epoch_index, generate_imgs=True):
         psnr_sum = 0 # Peak Signal to Noise Ratio:
@@ -231,6 +290,11 @@ class LearningController:
             #Generate a prediction with G and calculate mse and psnr from mse
             prediction = self.G(input)
             mse = self.mse_loss(prediction, target)
+
+            # prediction = prediction * (input > 0).float()  # only supervise non-zero
+            # loss_g_l1 = self.l1_loss(prediction, self.real_b)
+            # print("L1 Test: " + str(loss_g_l1))
+
             psnr = 10 * log10(1 / mse.data.item())
             psnr_sum += psnr
 
@@ -250,6 +314,7 @@ class LearningController:
 
         average_psnr = psnr_sum / len(self.testloader)
         print("Average PSNR = {:.6f}".format(average_psnr))
+        self.plotter.plot_csv_to_image()
 
     def checkpoint(self, epoch):
         #create directory for checkpoints

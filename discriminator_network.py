@@ -1,5 +1,7 @@
 import torch.nn as nn
 import numpy as np
+from discriminator_blocks import StartBlock, FCBlock, OutputBlock, SingleBlock
+import torch
 
 #patch-gan == convnet ?
 # PATCH GAN:
@@ -12,10 +14,10 @@ import numpy as np
 
 # -> Faster, training with larger images, results equally good or better than normal GAN
 
-class get_patch_GAN_discriminator(nn.Module):
+class Discriminator_pix2pix(nn.Module):
     def __init__(self, num_channels, num_filters=64,
                  num_layers=3):
-        super(get_patch_GAN_discriminator, self).__init__()
+        super(Discriminator_pix2pix, self).__init__()
 
         kernel_width = 4
         padding_width = int(np.ceil((kernel_width-1)/2)) #standard, I think
@@ -63,3 +65,59 @@ class get_patch_GAN_discriminator(nn.Module):
 
     def forward(self, input):
         return self.model(input)
+
+
+"""
+All Leaky ReLUs with 0.2 slope
+RGB -> Conv + Leaky ReLU - 32x3x3x3 (1 stride)
+Depth -> Conv + Leaky ReLU 32x1x3x3 (1 stride)
+Concatenate
+
+Conv + Leaky ReLU + BatchNormalization - 64x64x4x4 (2 stride)
+...
+Conv + Leaky ReLU + BatchNormalization 512x256x4x4 (2 stride)
+FC + Leaky ReLU 1024x512x4x4 (1 stride)
+FC 1x1024x4x4 (1 stride)
+   
+It uses LeakyReLU activation (0.2 slope) and four convolutional layers. The strided 
+convolution is adopted to reduce the spatial resolution instead of max-pooling. 
+We also add a batch normalization layer to the output of every convolutional layer.
+The discriminator D outputs a single scalar, representing the probability that the 
+input comes from the ground-truth rather than pG
+"""
+class Discriminator_Jung(nn.Module):
+    def __init__(self):
+        super(Discriminator_Jung, self).__init__()
+
+        self.rgb_start = nn.Sequential(
+            StartBlock(3, 32),
+        )
+
+        self.depth_start = nn.Sequential(
+            StartBlock(1, 32),
+        )
+
+        self.conv_blocks = nn.Sequential(
+            SingleBlock(64, 128),
+            SingleBlock(128, 256),
+            SingleBlock(256, 512),
+            SingleBlock(512, 1024)
+        )
+
+        self.output_block = nn.Sequential(
+            FCBlock(),
+            OutputBlock()
+        )
+
+    def forward(self, x_rgb, x_depth):
+        #StartBlock rgb + depth
+        x1 = self.rgb_start(x_rgb)
+        x2 = self.depth_start(x_depth)
+        #Concatenation
+        x = torch.cat((x1, x2), 1)
+        #CONV blocks
+        x = self.conv_blocks(x)
+        #FC part and output
+        output = self.output_block(x)
+
+        return output

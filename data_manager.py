@@ -6,18 +6,21 @@ import torchvision.transforms as transforms
 
 import torch.utils.data as data
 
+import torch
 import cv2
 import numpy as np
+
+import random
 
 #This class will be used to load data from the specified folder and
 # retrieve it using the index. Maybe get an elegant method for iterating
 # through it without having to load it all at once (see Generators from TF)
 class DataManager(data.Dataset):
-    def __init__(self, folder_path, train):
+    def __init__(self, folder_path, train, use_small_patches):
         super(DataManager, self).__init__()
         print("Created Data Manager")
         self.folder_path = folder_path
-
+        self.use_small_patches = use_small_patches
         if train:
             self.path_base = join(self.folder_path, "train")
         else:
@@ -27,12 +30,15 @@ class DataManager(data.Dataset):
         self.b_path = join(self.path_base, "b")
         # self.generate_all_paths()
 
-        transform_list = [transforms.ToTensor(),
-                          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        transform_list_a = [transforms.ToTensor()]
+        transform_list_b = [transforms.ToTensor()]
 
-        self.transform = transforms.Compose(transform_list)
+        self.transform_a = transforms.Compose(transform_list_a)
+        self.transform_b = transforms.Compose(transform_list_b)
 
         self.generate_all_paths()
+
+        self.starting_points = np.array([40, 60, 80, 100, 120, 140, 160, 180, 200, 220])
 
 
     # TODO: This might be a bad solution once folders get too big -> work in batches then or generator?
@@ -73,24 +79,46 @@ class DataManager(data.Dataset):
         a_img = cv2.resize(a_img, (0, 0), fx=0.75, fy=0.75)
         b_img = cv2.resize(b_img, (0, 0), fx=0.75, fy=0.75)
 
-        print("IMAGE SHAPES:")
-        print(a_img.shape)
-        a_img = a_img[30:286, 30:286]
-        a_img = a_img[..., ::-1] #convert BGR (cv2) to RGB (what we want later)
-        a_img = a_img.copy() #remove negative strides
+        #print("IMAGE SHAPES:")
+        #print(a_img.shape)
 
-        b_img = b_img[30:286, 30:286]
-        b_img = b_img[:, :, np.newaxis] #add the extra axis so we can work with this as we do with rgb -> less code
+        if self.use_small_patches:
+            index = np.random.choice(self.starting_points.shape[0], 1, replace=False)
+            starting_point = self.starting_points[index[0]]
+            print("STARTING POINT: " + str(starting_point))
+            a_img = a_img[starting_point:starting_point + 64, starting_point:starting_point + 64] #replace starting_point + 64 with 286 for original size
+            a_img = a_img[..., ::-1] #convert BGR (cv2) to RGB (what we want later)
+            a_img = a_img.copy() #remove negative strides
+    
+            b_img = b_img[starting_point:starting_point + 64, starting_point:starting_point + 64]
+            b_img = b_img[:, :, np.newaxis] #add the extra axis so we can work with this as  we do with rgb -> less code
+        else:
+            a_img = a_img[30:286, 30:286]
+            a_img = a_img[..., ::-1]  # convert BGR (cv2) to RGB (what we want later)
+            a_img = a_img.copy()  # remove negative strides
 
-        print(a_img.shape)
+            b_img = b_img[30:286, 30:286]
+            b_img = b_img[:, :, np.newaxis]  # add the extra axis so we can work with this as  we do with rgb -> less code
+            
+        #print(a_img.shape)
+
+        #print("MIN AND MAX a_img: " + str(np.amin(a_img)) + "--" + str(np.amax(a_img)))
+        print("MIN AND MAX b_img: " + str(np.amin(b_img)) + "--" + str(np.amax(b_img)))
+
         # a_img = PIL.Image.open(self.a_images[index]).resize((480, 360), PIL.Image.BICUBIC)
         # b_img = PIL.Image.open(self.b_images[index]).resize((480, 360), PIL.Image.BICUBIC)
 
         # a_img = a_img.crop((30, 30, 286, 286))
         # b_img = b_img.crop((30, 30, 286, 286))
 
-        a = self.transform(a_img)
-        b = self.transform(b_img)
+        a = self.transform_a(a_img)
+        b = self.transform_b(b_img)
+
+        # a = np.transpose(a_img, (2, 0, 1))
+        # b = np.transpose(b_img, (2, 0, 1))
+        #
+        # a = torch.from_numpy(a)
+        # b = torch.from_numpy(b)
 
 
         #TODO: Probably, we don't need 256x256

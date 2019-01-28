@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from depth_pred_blocks import EncoderBlock, DecoderBlock, UpsamplingBlock, OutconvBlock, FeatureBlock, ResidualRefinementBlock, RefinementBlock
+from depth_pred_blocks import EncoderBlock, DecoderBlock, UpsamplingBlock, OutconvBlock, FeatureBlock, \
+    ResidualRefinementBlock, RefinementBlock, FinalDecoderBlock, LatentVectorBlock
 from torchvision import models
 
 class CompleteGenerator(nn.Module):
@@ -9,13 +10,13 @@ class CompleteGenerator(nn.Module):
         super(CompleteGenerator, self).__init__()
 
         self.glob = GlobalNet(num_channels_in, num_channels_out)
-        # self.ref = RefinementNet(num_channels_in, num_channels_out)
+        self.ref = RefinementNet(num_channels_in, num_channels_out)
 
     def forward(self, x):
         x_glob = self.glob(x)
-        # x_ref = self.ref(x, x_glob)
+        x_refined = self.ref(x, x_glob)
 
-        return x_glob
+        return x_refined
 
 """
 For the encoder,
@@ -39,17 +40,13 @@ class GlobalNet(nn.Module):
 
         self.encoder = nn.Sequential(
             self.encoder,
-            # EncoderBlock(num_channels_in, 64),
-            # EncoderBlock(64, 128),
-            # EncoderBlock(128, 256),
-            # EncoderBlock(256, 512),
             EncoderBlock(512, 512),
-            # EncoderBlock(512, 1024)
         )
-        # # print(self.encoder)
-        # self.encoder = nn.Sequential(
-        #     self.encoder,
-        #     EncoderBlock(512, 1024)
+
+        #try fc layer here ~ around 1000s - 10000s
+        # -> latent vector
+        # self.fc_segment = nn.Sequential(
+        #     LatentVectorBlock()
         # )
 
         self.decoder = nn.Sequential(
@@ -57,10 +54,8 @@ class GlobalNet(nn.Module):
             DecoderBlock(512, 512),
             DecoderBlock(512, 256),
             DecoderBlock(256, 128),
-            DecoderBlock(128, num_channels_out),
-            # DecoderBlock(64, num_channels_out),
-            UpsamplingBlock(num_channels_out, num_channels_out),
-            # OutconvBlock(num_channels_out, num_channels_out)
+            FinalDecoderBlock(128, num_channels_out),
+            # DecoderBlock(64, num_channels_out)
         )
 
     def forward(self, x):
@@ -70,7 +65,9 @@ class GlobalNet(nn.Module):
         #
         # print("AFTER DECODER:")
         # print(summary(self.decoder, (512, 8, 8)))
+        # x1 = self.fc_segment(x1)
         output = self.decoder(x1)
+        output = nn.functional.interpolate(output, scale_factor=2, mode='bilinear', align_corners=True)
 
         return output
 
@@ -88,23 +85,26 @@ class RefinementNet(nn.Module):
         print("REFINEMENT NET IS ALSO GOOD")
 
         self.feature_map_net = nn.Sequential(
-            FeatureBlock(num_channels_in, num_channels_in),
-            FeatureBlock(num_channels_in, num_channels_in),
-            FeatureBlock(num_channels_in, num_channels_out)
+            FeatureBlock(num_channels_in, 64),
+            FeatureBlock(64, 64),
+            FeatureBlock(64, 64)
         )
 
         #This can already be grayscale
         self.refinement_net1 = nn.Sequential(
-            RefinementBlock(num_channels_out, num_channels_out),
-            RefinementBlock(num_channels_out, num_channels_out)
+            RefinementBlock(num_channels_out, 64),
+            RefinementBlock(64, 64),
+            RefinementBlock(64, 64)
         )
 
-        self.refinement_net2 = ResidualRefinementBlock(num_channels_in + num_channels_out, num_channels_out)
+        self.res_refinement = ResidualRefinementBlock(64+64, 64)
 
         self.refinement_net3 = nn.Sequential(
-            RefinementBlock(num_channels_out, num_channels_out),
-            RefinementBlock(num_channels_out, num_channels_out),
-            OutconvBlock(num_channels_out, num_channels_out)
+            DecoderBlock(64, 64),
+            DecoderBlock(64, 64),
+            FinalDecoderBlock(64, num_channels_out)
+            # DecoderBlock(64, num_channels_out),
+            # OutconvBlock(num_channels_out, num_channels_out)
         )
 
     def forward(self, x_rgb, x_global):
@@ -112,7 +112,9 @@ class RefinementNet(nn.Module):
         feature_x = self.feature_map_net(x_rgb)
         refinement1_x = self.refinement_net1(x_global)
 
-        refinement2_x = self.refinement_net2(refinement1_x, feature_x)
-        refinement3_x = self.refinement_net3(refinement2_x)
+        residual_refinement = self.res_refinement(refinement1_x, feature_x)
 
-        return refinement3_x
+        # x_global = self.feature_map_net(x_global) #this is just for testing
+        refinement2_x = self.refinement_net3(residual_refinement)
+
+        return refinement2_x
