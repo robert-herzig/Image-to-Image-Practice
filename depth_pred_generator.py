@@ -16,7 +16,8 @@ class CompleteGenerator(nn.Module):
         x_glob = self.glob(x)
         x_refined = self.ref(x, x_glob)
 
-        return x_refined
+        return x_refined, x_glob
+
 
 """
 For the encoder,
@@ -52,8 +53,11 @@ class GlobalNet(nn.Module):
         self.decoder = nn.Sequential(
             # DecoderBlock(1024, 512),
             DecoderBlock(512, 512),
+            nn.Dropout(0.4),
             DecoderBlock(512, 256),
+            nn.Dropout(0.4),
             DecoderBlock(256, 128),
+            nn.Dropout(0.4),
             FinalDecoderBlock(128, num_channels_out),
             # DecoderBlock(64, num_channels_out)
         )
@@ -87,20 +91,24 @@ class RefinementNet(nn.Module):
         self.feature_map_net = nn.Sequential(
             FeatureBlock(num_channels_in, 64),
             FeatureBlock(64, 64),
-            FeatureBlock(64, 64)
+            FeatureBlock(64, 64),
         )
 
         #This can already be grayscale
         self.refinement_net1 = nn.Sequential(
             RefinementBlock(num_channels_out, 64),
+            nn.Dropout(0.2),
             RefinementBlock(64, 64),
-            RefinementBlock(64, 64)
+            nn.Dropout(0.2),
+            RefinementBlock(64, 64),
+            nn.Dropout(0.2),
         )
 
         self.res_refinement = ResidualRefinementBlock(64+64, 64)
 
         self.refinement_net3 = nn.Sequential(
             DecoderBlock(64, 64),
+            nn.Dropout(0.2),
             DecoderBlock(64, 64),
             FinalDecoderBlock(64, num_channels_out)
             # DecoderBlock(64, num_channels_out),

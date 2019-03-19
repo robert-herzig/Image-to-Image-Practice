@@ -18,7 +18,7 @@ def save_tensor_as_image(image_tensor, filename):
         #print("SHAPE: " + str(img_array.shape))
         img_array = img_array.astype(np.uint8)
 
-        print(img_array.shape)
+        # print(img_array.shape)
         #generate pillow image and save it
         img = Image.fromarray(img_array)
         img.save(filename)

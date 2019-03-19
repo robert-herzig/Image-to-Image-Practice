@@ -20,6 +20,7 @@ from depth_pred_generator import GlobalNet, RefinementNet, CompleteGenerator
 import csv
 import datetime
 from csv_plotter import CSVPlotter
+import image_analysis
 
 #TODO: Add time check
 
@@ -35,6 +36,8 @@ class LearningController:
         if use_gpu and not torch.cuda.is_available():
             raise Exception("No compatible GPU available")
 
+        self.use_discriminator = use_discriminator
+
         cudnn.benchmark = True
         torch.manual_seed(seed)
         if use_gpu:
@@ -44,10 +47,11 @@ class LearningController:
         if load_models and os.path.isfile(load_path_G) and os.path.isfile(load_path_D):
             print("LOAD")
             self.G = torch.load(load_path_G)
-            if not self.use_Jung:
-                self.D = torch.load(load_path_D)
-            else:
-                self.D = discriminator_model.get_discriminator_model_Jung(use_gpu=True)
+            self.D = torch.load(load_path_D)
+            # if not self.use_Jung:
+            #     self.D = torch.load(load_path_D)
+            # else:
+            #     self.D = discriminator_model.get_discriminator_model_Jung(use_gpu=True)
             print("Successfully loaded G and D")
         else:
             self.G = CompleteGenerator(3, 1)
@@ -61,11 +65,11 @@ class LearningController:
         print_network(self.D)
 
         #data managers using the torch data util methods
-        self.trainloader = data_manager.DataManager(data_root, train=True, use_small_patches=use_discriminator)
-        self.testloader = data_manager.DataManager(data_root, train=False, use_small_patches=use_discriminator)
+        self.trainloader = data_manager.DataManager(data_root, train=True, use_small_patches=False)
+        self.testloader = data_manager.DataManager(data_root, train=False, use_small_patches=False)
 
-        self.train_generator = data.DataLoader(self.trainloader, batch_size=1, shuffle=True, num_workers=0)
-        self.test_generator = data.DataLoader(self.testloader, batch_size=1, shuffle=True, num_workers=0)
+        self.train_generator = data.DataLoader(self.trainloader, batch_size=8, shuffle=True, num_workers=0)
+        self.test_generator = data.DataLoader(self.testloader, batch_size=1, shuffle=False, num_workers=0)
 
         print("AMOUNT OF IMAGES FOR TRAINING: " + str(len(self.trainloader)))
         print("AMOUNT OF IMAGES FOR TESTING: " + str(len(self.testloader)))
@@ -75,6 +79,8 @@ class LearningController:
         self.gan_loss = gan_loss.GANLoss()
         self.l1_loss = nn.L1Loss()
         self.mse_loss = nn.MSELoss()
+
+        self.last_val_loss = 0 #this is just initialization
 
         #need two optimizers as we have different numbers of params
         self.optimizerG = optim.Adam(self.G.parameters(), lr=0.002, betas=(0.5, 0.999))
@@ -116,7 +122,7 @@ class LearningController:
 
 
     def train_only_global_generator(self, use_gpu):
-        self.optimizerG = optim.SGD(self.G.parameters(), lr=0.004, momentum=0.9)
+        self.optimizerG = optim.SGD(self.G.parameters(), lr=0.002)
 
         #TODO:
         # Change loss so network doesn't predict zeros:
@@ -128,8 +134,17 @@ class LearningController:
         #     print(a)
         #     print(b)
 
+        l1_sum_train = 0
+        l1_count = 0
+
         for iteration, data in enumerate(self.train_generator, 0):
             a_images, b_images = data
+            for im in b_images:
+                #TODO: Check here whether we actually want to use these images? Or already check in the generator
+                im = im[0]
+                avg_grad = image_analysis.get_avg_gradient(im)
+                rel_zeros = image_analysis.check_for_zeros(im)
+                print("AVERAGE GRADIENT: " + str(avg_grad) + " PERCENT ZEROS: " + str(rel_zeros))
             print("BATCH " + str(iteration+1) + "/" + str(len(self.train_generator)))
             for i in range(0, len(a_images)):
                 with torch.no_grad():
@@ -143,7 +158,8 @@ class LearningController:
                 self.real_b = real_output.unsqueeze(0)
 
                 # let G generate the fake image
-                fake_b = self.G(self.real_a)
+                fake_b, fake_b_global = self.G(self.real_a)
+
 
                 # Clear the gradients
                 self.optimizerG.zero_grad()
@@ -154,20 +170,34 @@ class LearningController:
 
                 # Addition of l1 loss
                 fake_b = fake_b * (self.real_b > 0).float() #only supervise non-zero
-                loss_g_l1 = self.l1_loss(fake_b, self.real_b)# In the paper they recommend lambda = 100!
+                loss_g_l1 = self.l1_loss(fake_b, self.real_b)
+
+                fake_b_global = fake_b_global * (self.real_b > 0).float()
+                l1_only_global = self.l1_loss(fake_b_global, self.real_b)
+                weight_only_global = 0.5
 
                 # get combined loss for G and do backprop + optimizer step
-                loss_g = loss_g_l1
+                loss_g = loss_g_l1 + weight_only_global * l1_only_global
 
                 loss_g.backward()
                 self.optimizerG.step()
 
                 print("STEP " + str(i+1) + "/" + str(len(a_images)) + " G-LOSS: " + str(loss_g.data.item()))
 
-        with open(self.csv_logfile, 'a', newline='') as csvfile:
-            spamwriter = csv.writer(csvfile, delimiter=',',
-                                    quotechar='|', quoting=csv.QUOTE_MINIMAL)
-            spamwriter.writerow([loss_g.data.item()])
+                l1_sum_train += loss_g.data.item()
+                l1_count += 1
+
+        print("GOT " + str(l1_count) + " VALUES FOR TRAINING LOSS CALCULATION:")
+
+        l1_train = l1_sum_train / l1_count
+        print("---> " + str(l1_sum_train) + "/" + str(l1_count) + " = " + str(l1_train))
+        self.cur_l1_train = l1_train
+
+        # with open(self.csv_logfile, 'a', newline='') as csvfile:
+        #
+        #     spamwriter = csv.writer(csvfile, delimiter=',',
+        #                             quotechar='|', quoting=csv.QUOTE_MINIMAL)
+        #     spamwriter.writerow([l1_train, self.last_val_loss])
         # self.plotter.plot_csv_to_image()
 
 
@@ -180,11 +210,23 @@ class LearningController:
         # enumerate through the trainloader - thanks torch.utils.data, great job!
         #TODO: Use batches properly!
         # iteration = 0
-        self.optimizerG = optim.SGD(self.G.parameters(), lr=0.001)
-        self.optimizerD = optim.SGD(self.D.parameters(), lr=0.001)
+        self.optimizerG = optim.SGD(self.G.parameters(), lr=0.004)
+        self.optimizerD = optim.SGD(self.D.parameters(), lr=0.004)
 
+        g_loss = 0
+        g_loss_count = 0
+        d_loss = 0
+        d_loss_count = 0
         for iteration, data in enumerate(self.train_generator, 0):
             a_images, b_images = data
+
+            for im in b_images:
+                #TODO: Check here whether we actually want to use these images? Or already check in the generator
+                im = im[0]
+                avg_grad = image_analysis.get_avg_gradient(im)
+                rel_zeros = image_analysis.check_for_zeros(im)
+                print("AVERAGE GRADIENT: " + str(avg_grad) + " PERCENT ZEROS: " + str(rel_zeros))
+
             print("BATCH " + str(iteration+1) + "/" + str(len(self.train_generator)))
             for i in range(0, len(a_images)):
 
@@ -199,12 +241,17 @@ class LearningController:
                 self.real_b = real_output.unsqueeze(0)
 
                 #let G generate the fake image
-                fake_b = self.G(self.real_a)
+                fake_b, fake_b_global = self.G(self.real_a)
 
                 # Do the same with discriminator as with L1 earlier here
                 # -> don't learn zero spots!
                 # Addition of l1 loss
                 fake_b = fake_b * (self.real_b > 0).float()  # only supervise non-zero
+
+                fake_b_global = fake_b_global * (self.real_b > 0).float()
+
+                l1_only_global = self.l1_loss(fake_b_global, self.real_b)
+                weight_only_global = 25
 
                 fake_b = fake_b.cuda()
                 #Clear the gradients
@@ -247,74 +294,118 @@ class LearningController:
                 loss_g_gan = self.gan_loss(pred_fake, True) * 1
 
                 # Addition of l1 loss
-                loss_g_l1 = self.l1_loss(fake_b, self.real_b) * 10 #In the paper they recommend lambda = 100!
+                loss_g_l1 = self.l1_loss(fake_b, self.real_b) * 25 #In the paper they recommend lambda = 100!
+                loss_global_only = weight_only_global * l1_only_global
 
                 # get combined loss for G and do backprop + optimizer step
-                loss_g = loss_g_gan + loss_g_l1
+                loss_g = loss_g_gan + loss_g_l1 + loss_global_only
                 print("LOSS G CONSISTING OF GAN: " + str(loss_g_gan.data.item()) + " AND L1: " + str(loss_g_l1.data.item()))
                 loss_g.backward()
                 self.optimizerG.step()
 
-                print("STEP " + str(iteration) + "/" + str(len(self.trainloader)) + ": D-LOSS: "
+                g_loss += loss_g.data.item()
+                g_loss_count += 1
+                d_loss += loss_d.data.item()
+                d_loss_count += 1
+
+                print("STEP " + str(iteration) + "/" + str(len(a_images)) + ": D-LOSS: "
                       + str(loss_d.data.item()) +
                       " G-LOSS: " + str(loss_g.data.item()))
 
-        with open(self.csv_logfile, 'a', newline='') as csvfile:
-            spamwriter = csv.writer(csvfile, delimiter=',',
-                                    quotechar='|', quoting=csv.QUOTE_MINIMAL)
-            spamwriter.writerow([loss_g.data.item()])
+        print("GOT " + str(g_loss_count) + " VALUES FOR TRAINING LOSS CALCULATION:")
+
+        overall_g_loss = (g_loss / g_loss_count) / 51 #Because we weigh 25xglobal + 25xrefine + 1xGAN
+        overall_d_loss = d_loss / d_loss_count
+        print("---> " + str(g_loss) + "/" + str(g_loss_count) + " = " + str(overall_g_loss))
+        self.cur_l1_train = overall_g_loss
+        self.cur_d_loss = overall_d_loss
+
+        # with open(self.csv_logfile, 'a', newline='') as csvfile:
+        #     spamwriter = csv.writer(csvfile, delimiter=',',
+        #                             quotechar='|', quoting=csv.QUOTE_MINIMAL)
+        #     spamwriter.writerow([loss_g.data.item()])
 
 
+    #TODO CHECK HERE IF VALIDATION TESTING IS CORRECT!
     def test(self, use_gpu, epoch_index, generate_imgs=True):
         psnr_sum = 0 # Peak Signal to Noise Ratio:
                 #PSNR = 10 * log_10 (MAX^2_I / MSE), max here is 1
         test_counter = 0 #this is for naming the result images in for our test
 
+        l1_sum = 0
+        l1_counter = 0
         #same enumeration as for trainloader, but on test data now
-        for batch in self.testloader:
+        for iteration, data in enumerate(self.test_generator, 0):
             test_counter += 1
             image_name = "epoch" + str(epoch_index) + "_test_image" + str(test_counter) + ".png"
             image_name_input = "test_image" + str(test_counter) + "_INPUT.png"
             image_name_target = "test_image" + str(test_counter) + "_TARGET.png"
 
-            #Get real data again, just like in learn()
+            a_images, b_images = data
+            a_img = a_images[0]
+            b_img = b_images[0]
             with torch.no_grad():
-                input, target = Variable(batch[0]), Variable(batch[1])
+                real_input, real_output = Variable(a_img), Variable(b_img)
+                # real_input, real_output = Variable(train_a, train_b)
                 if use_gpu:
-                    input = input.cuda()
-                    target = target.cuda()
+                    real_input = real_input.cuda()
+                    real_output = real_output.cuda()
 
-            input = input.unsqueeze(0)
-            target = target.unsqueeze(0)
+            input = real_input.unsqueeze(0) #should stay consistently at a/b or input/output
+            target = real_output.unsqueeze(0)
 
             #Generate a prediction with G and calculate mse and psnr from mse
-            prediction = self.G(input)
-            mse = self.mse_loss(prediction, target)
+            prediction, prediction_global_only = self.G(input)
+            # mse = self.mse_loss(prediction, target)
 
             # prediction = prediction * (input > 0).float()  # only supervise non-zero
             # loss_g_l1 = self.l1_loss(prediction, self.real_b)
             # print("L1 Test: " + str(loss_g_l1))
 
-            psnr = 10 * log10(1 / mse.data.item())
-            psnr_sum += psnr
+            sup_pred = prediction * (target > 0).float()  # only supervise non-zero
 
-            #if you do not want to generate images, skip the rest of the loop
-            if not generate_imgs:
-                continue
+            l1 = self.l1_loss(sup_pred, target)
+            l1_loss = l1.data.item()
+            l1_sum += l1_loss
+            l1_counter += 1
+            # psnr = 10 * log10(1 / mse.data.item())
+            # psnr_sum += psnr
 
             # Generate an image, this is not necessary all the time
-            if test_counter % 1 == 0:
-                prediction = prediction.cpu()
-                predicted_img = prediction.data[0]
-                if not os.path.exists(os.path.join("result", "depth")):
-                    os.makedirs(os.path.join("result", "depth"))
-                img_util.save_tensor_as_image(predicted_img, "result/{}/{}".format("depth", image_name))
-                img_util.save_tensor_as_image(input.data[0], "result/{}/{}".format("depth", image_name_input))
-                img_util.save_tensor_as_image(target.data[0], "result/{}/{}".format("depth", image_name_target))
+            generate_imgs = True
+            if generate_imgs:
+                if test_counter % 1 == 0:
+                    prediction = prediction.cpu()
+                    predicted_img = prediction.data[0]
+                    if not os.path.exists(os.path.join("result", "depth")):
+                        os.makedirs(os.path.join("result", "depth"))
+                    img_util.save_tensor_as_image(predicted_img, "result/{}/{}".format("depth", image_name))
+                    img_util.save_tensor_as_image(input.data[0], "result/{}/{}".format("depth", image_name_input))
+                    img_util.save_tensor_as_image(target.data[0], "result/{}/{}".format("depth", image_name_target))
 
-        average_psnr = psnr_sum / len(self.testloader)
-        print("Average PSNR = {:.6f}".format(average_psnr))
-        self.plotter.plot_csv_to_image()
+        # average_psnr = psnr_sum / len(self.testloader)
+        # print("Average PSNR = {:.6f}".format(average_psnr))
+
+
+        print("GOT " + str(l1_counter) + " VALUES FOR VALIDATION LOSS CALCULATION:")
+        avg_l1 = l1_sum / l1_counter
+        self.last_val_loss = avg_l1
+
+        print("---> " + str(l1_sum) + "/" + str(l1_counter) + " = " + str(avg_l1))
+
+        print("TRAINING L1 LOSS = " + str(self.cur_l1_train))
+        print("VALIDATION L1 LOSS = " + str(avg_l1))
+
+        with open(self.csv_logfile, 'a', newline='') as csvfile:
+
+            spamwriter = csv.writer(csvfile, delimiter=',',
+                                    quotechar='|', quoting=csv.QUOTE_MINIMAL)
+
+            if self.use_discriminator:
+                spamwriter.writerow([self.cur_l1_train, self.last_val_loss, self.cur_d_loss])
+            else:
+                spamwriter.writerow([self.cur_l1_train, self.last_val_loss])
+        # self.plotter.plot_csv_to_image()
 
     def checkpoint(self, epoch):
         #create directory for checkpoints

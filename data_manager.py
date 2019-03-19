@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 
 import random
+import image_analysis
 
 #This class will be used to load data from the specified folder and
 # retrieve it using the index. Maybe get an elegant method for iterating
@@ -79,6 +80,8 @@ class DataManager(data.Dataset):
         a_img = cv2.resize(a_img, (0, 0), fx=0.75, fy=0.75)
         b_img = cv2.resize(b_img, (0, 0), fx=0.75, fy=0.75)
 
+        # grads = image_analysis.get_avg_gradient(b_img)
+        # num_zeros = image_analysis.check_for_zeros(b_img)
         #print("IMAGE SHAPES:")
         #print(a_img.shape)
 
@@ -103,7 +106,7 @@ class DataManager(data.Dataset):
         #print(a_img.shape)
 
         #print("MIN AND MAX a_img: " + str(np.amin(a_img)) + "--" + str(np.amax(a_img)))
-        print("MIN AND MAX b_img: " + str(np.amin(b_img)) + "--" + str(np.amax(b_img)))
+        # print("MIN AND MAX b_img: " + str(np.amin(b_img)) + "--" + str(np.amax(b_img)))
 
         # a_img = PIL.Image.open(self.a_images[index]).resize((480, 360), PIL.Image.BICUBIC)
         # b_img = PIL.Image.open(self.b_images[index]).resize((480, 360), PIL.Image.BICUBIC)
