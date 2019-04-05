@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from depth_pred_blocks import EncoderBlock, DecoderBlock, UpsamplingBlock, OutconvBlock, FeatureBlock, \
-    ResidualRefinementBlock, RefinementBlock, FinalDecoderBlock, LatentVectorBlock
+    ResidualRefinementBlock, RefinementBlock, FinalDecoderBlock, LatentVectorBlock, HierarchicalRefinementResBlock
 from torchvision import models
 
 class CompleteGenerator(nn.Module):
@@ -17,6 +17,59 @@ class CompleteGenerator(nn.Module):
         x_refined = self.ref(x, x_glob)
 
         return x_refined, x_glob
+
+"""
+Using the refinement process from the StereoNet paper
+
+2 x 3 residual layers  for feature extraction and then 
+"""
+class StereoNetGenerator(nn.Module):
+    def __init__(self, num_channels_in, num_channels_out):
+        super(StereoNetGenerator, self).__init__()
+        print("INIT GENERATOR WITH HIERARCHICAL REFINEMENT")
+        self.glob = GlobalNet(num_channels_in, num_channels_out)
+        self.ref = HierarchicalRefinement()
+
+
+    def forward(self, x):
+        x_glob = self.glob(x)
+        # x_glob = nn.functional.interpolate(x_glob, scale_factor=2, mode='bilinear', align_corners=True)
+        x_refined = self.ref(x_glob, x)
+
+        return x_refined, x_glob
+
+
+"""
+Hierarchical Refinement: Edge-Aware Upsampling
+Refinement Network:
+Input = disparity bilinearly upsampled to output size as well as the color resized to the same dimensions
+-> better than transposed convolutions because of artifacts? -> bilin. interpol. + convs instead
+-> concatenate color + disparity (disparity is then our low resolution output of global net?)
+-> passed through 3x3 conv layer with 32 channel output - -> then 6* 3x3 conv with batch norm and leaky relu 0.2
+-> dilation factor for the residual blocks to 1, 2, 4, 8, 1, 1 -> output then processed using 3x3 conv layer without 
+batch-norm or activation -> output is 1-dimensional disparity residual -> ReLU to the sum
+"""
+class HierarchicalRefinement(nn.Module):
+    def __init__(self):
+        super(HierarchicalRefinement, self).__init__()
+
+        self.refine = nn.Sequential(
+            nn.Conv2d(4, 32, 3, padding=1),
+            HierarchicalRefinementResBlock(32, 32, dilation=1),
+            HierarchicalRefinementResBlock(32, 32, dilation=2),
+            HierarchicalRefinementResBlock(32, 32, dilation=4),
+            HierarchicalRefinementResBlock(32, 32, dilation=8),
+            HierarchicalRefinementResBlock(32, 32, dilation=1),
+            HierarchicalRefinementResBlock(32, 32, dilation=1),
+            nn.Conv2d(32, 1, 3, padding=1),
+            # nn.ReLU(),
+        )
+
+    def forward(self, upsampled_global_output, rgb_image):
+        comb = torch.cat([upsampled_global_output, rgb_image], dim=1)
+        x = self.refine(comb)
+
+        return x
 
 
 """
@@ -53,11 +106,11 @@ class GlobalNet(nn.Module):
         self.decoder = nn.Sequential(
             # DecoderBlock(1024, 512),
             DecoderBlock(512, 512),
-            nn.Dropout(0.4),
+            # nn.Dropout(0.4),
             DecoderBlock(512, 256),
-            nn.Dropout(0.4),
+            # nn.Dropout(0.4),
             DecoderBlock(256, 128),
-            nn.Dropout(0.4),
+            # nn.Dropout(0.4),
             FinalDecoderBlock(128, num_channels_out),
             # DecoderBlock(64, num_channels_out)
         )

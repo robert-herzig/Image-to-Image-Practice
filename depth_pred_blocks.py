@@ -174,3 +174,51 @@ class LatentVectorBlock(nn.Module):
         print("SHAPE AFTER LATENT BLOCK: " + str(x.size(0)) + "|" + str(x.size(1)) + "|" + str(x.size(2)) +
               "|" + str(x.size(3)))
         return x
+
+class HierarchicalRefinementResBlock(nn.Module):
+    def __init__(self, in_channel, out_channel, dilation=1, stride=1, downsample=None):
+        super(HierarchicalRefinementResBlock, self).__init__()
+
+        # To keep the shape of input and output same when dilation conv, we should compute the padding:
+        # Reference:
+        #   https://discuss.pytorch.org/t/how-to-keep-the-shape-of-input-and-output-same-when-dilation-conv/14338
+        # padding = [(o-1)*s+k+(k-1)*(d-1)-i]/2, here the i is input size, and o is output size.
+        # set o = i, then padding = [i*(s-1)+k+(k-1)*(d-1)]/2 = [k+(k-1)*(d-1)]/2      , stride always equals 1
+        # if dilation != 1:
+        #     padding = (3+(3-1)*(dilation-1))/2
+        padding = dilation
+
+        self.conv1 = nn.Conv2d(in_channel, out_channel, kernel_size=3, stride=stride,
+                     padding=padding, dilation=dilation, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channel)
+        self.relu1 = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+
+        self.conv2 = nn.Conv2d(out_channel, out_channel, kernel_size=3, stride=stride,
+                               padding=padding, dilation=dilation, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channel)
+        self.relu2 = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+
+        self.downsample = downsample
+        self.stride = stride
+        self.in_ch = in_channel
+        self.out_ch = out_channel
+        self.p = padding
+        self.d = dilation
+
+    def forward(self, x):
+        residual = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+
+        out = self.relu1(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        out += residual
+
+        out = self.relu2(out)
+
+        return out
+
+

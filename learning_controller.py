@@ -15,7 +15,7 @@ import img_util
 
 from torch.utils import data
 
-from depth_pred_generator import GlobalNet, RefinementNet, CompleteGenerator
+from depth_pred_generator import GlobalNet, RefinementNet, CompleteGenerator, StereoNetGenerator
 
 import csv
 import datetime
@@ -25,12 +25,15 @@ import image_analysis
 #TODO: Add time check
 
 class LearningController:
-    def __init__(self, use_Jung = True): #if use_Jung is True, then we load its D and G instead of pix2pix
+    def __init__(self, use_Jung = True, use_pix2pix = False, use_global_only=False): #if use_Jung is True, then we load its D and G instead of pix2pix
         print("INIT LEARNING CONTROLLER")
         self.cur_index = 0
         self.use_Jung = use_Jung
+        self.global_only = use_global_only
+        self.use_pix2pix = use_pix2pix
 
-    def prepare(self, data_root, use_gpu, load_models, use_discriminator, load_path_G, load_path_D, seed=9876):
+    def prepare(self, data_root, use_gpu, load_models, use_discriminator, load_path_G, load_path_D, seed=9876,
+                use_hierarchical_refinement=True):
         # PREPARATION BEFORE LEARNING CAN BEGIN!
         ####################################################
         if use_gpu and not torch.cuda.is_available():
@@ -54,7 +57,14 @@ class LearningController:
             #     self.D = discriminator_model.get_discriminator_model_Jung(use_gpu=True)
             print("Successfully loaded G and D")
         else:
-            self.G = CompleteGenerator(3, 1)
+            if self.use_pix2pix:
+                self.G = generator_model.get_generator_model(3, 1, 32, True)
+            else:
+                if use_hierarchical_refinement:
+                    self.G = StereoNetGenerator(3, 1)
+                else:
+                    self.G = CompleteGenerator(3, 1)
+
             if self.use_Jung:
                 self.D = discriminator_model.get_discriminator_model_Jung(use_gpu=True)
             else:
@@ -128,12 +138,6 @@ class LearningController:
         # Change loss so network doesn't predict zeros:
         # supervise to the ground truth value
 
-
-        # for iteration, data in enumerate(self.train_generator, 0):
-        #     a, b = data
-        #     print(a)
-        #     print(b)
-
         l1_sum_train = 0
         l1_count = 0
 
@@ -174,10 +178,16 @@ class LearningController:
 
                 fake_b_global = fake_b_global * (self.real_b > 0).float()
                 l1_only_global = self.l1_loss(fake_b_global, self.real_b)
-                weight_only_global = 0.5
+                weight_only_global = 1
 
                 # get combined loss for G and do backprop + optimizer step
-                loss_g = loss_g_l1 + weight_only_global * l1_only_global
+                loss_g_global_weighted = weight_only_global * l1_only_global
+
+                if self.global_only:
+                    loss_g = loss_g_global_weighted
+                else:
+                    loss_g = loss_g_l1 + loss_g_global_weighted
+
 
                 loss_g.backward()
                 self.optimizerG.step()
@@ -241,17 +251,22 @@ class LearningController:
                 self.real_b = real_output.unsqueeze(0)
 
                 #let G generate the fake image
-                fake_b, fake_b_global = self.G(self.real_a)
+                if not self.use_pix2pix:
+                    fake_b, fake_b_global = self.G(self.real_a)
+                else:
+                    fake_b = self.G(self.real_a)
 
                 # Do the same with discriminator as with L1 earlier here
                 # -> don't learn zero spots!
                 # Addition of l1 loss
+                print(fake_b.size())
                 fake_b = fake_b * (self.real_b > 0).float()  # only supervise non-zero
 
-                fake_b_global = fake_b_global * (self.real_b > 0).float()
+                if not self.use_pix2pix:
+                    fake_b_global = fake_b_global * (self.real_b > 0).float()
 
-                l1_only_global = self.l1_loss(fake_b_global, self.real_b)
-                weight_only_global = 25
+                    l1_only_global = self.l1_loss(fake_b_global, self.real_b)
+                    weight_only_global = 0
 
                 fake_b = fake_b.cuda()
                 #Clear the gradients
@@ -291,14 +306,23 @@ class LearningController:
 
                 #Now for G -> get loss and do a step
                 #Get fake data from G and push it through D to get its prediction (real of fake)
-                loss_g_gan = self.gan_loss(pred_fake, True) * 1
+                loss_g_gan = self.gan_loss(pred_fake, True) * 0
 
                 # Addition of l1 loss
-                loss_g_l1 = self.l1_loss(fake_b, self.real_b) * 25 #In the paper they recommend lambda = 100!
-                loss_global_only = weight_only_global * l1_only_global
+                loss_g_l1 = self.l1_loss(fake_b, self.real_b) * 1 #In the paper they recommend lambda = 100!
+
+                if not self.use_pix2pix:
+                    loss_global_only = l1_only_global
 
                 # get combined loss for G and do backprop + optimizer step
-                loss_g = loss_g_gan + loss_g_l1 + loss_global_only
+                if not self.global_only:
+                    loss_g = loss_g_gan + loss_g_l1
+                else:
+                    loss_g = loss_global_only
+
+                # if not self.use_pix2pix:
+                #     loss_g += loss_global_only
+                    
                 print("LOSS G CONSISTING OF GAN: " + str(loss_g_gan.data.item()) + " AND L1: " + str(loss_g_l1.data.item()))
                 loss_g.backward()
                 self.optimizerG.step()
@@ -314,7 +338,7 @@ class LearningController:
 
         print("GOT " + str(g_loss_count) + " VALUES FOR TRAINING LOSS CALCULATION:")
 
-        overall_g_loss = (g_loss / g_loss_count) / 51 #Because we weigh 25xglobal + 25xrefine + 1xGAN
+        overall_g_loss = (g_loss / g_loss_count) #Because we weigh 25xglobal + 25xrefine + 1xGAN
         overall_d_loss = d_loss / d_loss_count
         print("---> " + str(g_loss) + "/" + str(g_loss_count) + " = " + str(overall_g_loss))
         self.cur_l1_train = overall_g_loss
@@ -355,14 +379,20 @@ class LearningController:
             target = real_output.unsqueeze(0)
 
             #Generate a prediction with G and calculate mse and psnr from mse
-            prediction, prediction_global_only = self.G(input)
+            if self.use_pix2pix:
+                prediction = self.G(input)
+            else:
+                prediction, prediction_global_only = self.G(input)
             # mse = self.mse_loss(prediction, target)
 
             # prediction = prediction * (input > 0).float()  # only supervise non-zero
             # loss_g_l1 = self.l1_loss(prediction, self.real_b)
             # print("L1 Test: " + str(loss_g_l1))
 
-            sup_pred = prediction * (target > 0).float()  # only supervise non-zero
+            if self.global_only:
+                sup_pred = prediction_global_only * (target > 0).float()
+            else:
+                sup_pred = prediction * (target > 0).float()  # only supervise non-zero
 
             l1 = self.l1_loss(sup_pred, target)
             l1_loss = l1.data.item()
@@ -375,7 +405,10 @@ class LearningController:
             generate_imgs = True
             if generate_imgs:
                 if test_counter % 1 == 0:
-                    prediction = prediction.cpu()
+                    if self.global_only:
+                        prediction = prediction_global_only.cpu()
+                    else:
+                        prediction = prediction.cpu()
                     predicted_img = prediction.data[0]
                     if not os.path.exists(os.path.join("result", "depth")):
                         os.makedirs(os.path.join("result", "depth"))
