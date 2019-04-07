@@ -25,12 +25,13 @@ import image_analysis
 #TODO: Add time check
 
 class LearningController:
-    def __init__(self, use_Jung = True, use_pix2pix = False, use_global_only=False): #if use_Jung is True, then we load its D and G instead of pix2pix
+    def __init__(self, use_Jung = True, use_pix2pix = False, use_global_only=False, train_only_ref=False): #if use_Jung is True, then we load its D and G instead of pix2pix
         print("INIT LEARNING CONTROLLER")
         self.cur_index = 0
         self.use_Jung = use_Jung
         self.global_only = use_global_only
         self.use_pix2pix = use_pix2pix
+        self.train_only_ref = train_only_ref
 
     def prepare(self, data_root, use_gpu, load_models, use_discriminator, load_path_G, load_path_D, seed=9876,
                 use_hierarchical_refinement=True):
