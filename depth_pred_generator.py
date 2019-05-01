@@ -82,8 +82,10 @@ layers. The output resolution of the global net is half the in-
 put image.
 """
 class GlobalNet(nn.Module):
-    def __init__(self, num_channels_in, num_channels_out):
+    def __init__(self, num_channels_in, num_channels_out, interpol_rate=2):
         super(GlobalNet, self).__init__()
+
+        self.interpol_rate = interpol_rate
 
         self.vgg16 = models.vgg16()
         # self.vgg16.load_state_dict(torch.load("vgg16-397923af.pth"))
@@ -95,36 +97,30 @@ class GlobalNet(nn.Module):
         self.encoder = nn.Sequential(
             self.encoder,
             EncoderBlock(512, 512),
+            EncoderBlock(512, 1024)
         )
 
-        #try fc layer here ~ around 1000s - 10000s
-        # -> latent vector
-        # self.fc_segment = nn.Sequential(
-        #     LatentVectorBlock()
-        # )
-
-        self.decoder = nn.Sequential(
-            # DecoderBlock(1024, 512),
-            DecoderBlock(512, 512),
-            # nn.Dropout(0.4),
-            DecoderBlock(512, 256),
-            # nn.Dropout(0.4),
-            DecoderBlock(256, 128),
-            # nn.Dropout(0.4),
-            FinalDecoderBlock(128, num_channels_out),
-            # DecoderBlock(64, num_channels_out)
-        )
+        if self.interpol_rate == 2:
+            self.decoder = nn.Sequential(
+                DecoderBlock(1024, 512),
+                DecoderBlock(512, 512),
+                DecoderBlock(512, 256),
+                # DecoderBlock(256, 128),
+                FinalDecoderBlock(256, num_channels_out),
+            )
+        else:
+            self.decoder = nn.Sequential(
+                DecoderBlock(1024, 512),
+                DecoderBlock(512, 512),
+                DecoderBlock(512, 256),
+                FinalDecoderBlock(256, num_channels_out),
+            )
 
     def forward(self, x):
         x1 = self.encoder(x)
-        # print("AFTER ENCODER:")
-        # print(summary(self.encoder, (3, 256, 256)))
-        #
-        # print("AFTER DECODER:")
-        # print(summary(self.decoder, (512, 8, 8)))
-        # x1 = self.fc_segment(x1)
+
         output = self.decoder(x1)
-        output = nn.functional.interpolate(output, scale_factor=2, mode='bilinear', align_corners=True)
+        output = nn.functional.interpolate(output, scale_factor=4, mode='bilinear', align_corners=True)
 
         return output
 

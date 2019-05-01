@@ -15,7 +15,7 @@ import img_util
 
 from torch.utils import data
 
-from depth_pred_generator import GlobalNet, RefinementNet, CompleteGenerator, StereoNetGenerator
+from depth_pred_generator import GlobalNet, RefinementNet, CompleteGenerator, StereoNetGenerator, HierarchicalRefinement
 
 import csv
 import datetime
@@ -46,9 +46,9 @@ class LearningController:
         torch.manual_seed(seed)
         if use_gpu:
             torch.cuda.manual_seed(seed)
-
+        net_g_model_out_path_global = "checkpoint/{}/netG_global.pth".format("Test1")
         #For the first tests, only load the generator
-        if load_models and os.path.isfile(load_path_G) and os.path.isfile(load_path_D):
+        if load_models and os.path.isfile(load_path_G) and os.path.isfile(load_path_D) and self.use_pix2pix:
             print("LOAD")
             self.G = torch.load(load_path_G)
             self.D = torch.load(load_path_D)
@@ -57,14 +57,35 @@ class LearningController:
             # else:
             #     self.D = discriminator_model.get_discriminator_model_Jung(use_gpu=True)
             print("Successfully loaded G and D")
+        elif load_models and os.path.isfile(net_g_model_out_path_global):
+            print("LOAD GLOBAL ONLY")
+            self.G_global = torch.load(net_g_model_out_path_global)
+            net_g_model_out_path_refinement = "checkpoint/{}/netG_refinement.pth".format("Test1")
+            self.G_ref = torch.load(net_g_model_out_path_refinement)
+            self.D = torch.load(load_path_D)
+
+            # if use_hierarchical_refinement:
+            #     self.G_ref = HierarchicalRefinement()
+            # else:
+            #     self.G_ref = RefinementNet(3, 1)
+            #
+            # if self.use_Jung:
+            #     self.D = discriminator_model.get_discriminator_model_Jung(use_gpu=True)
+            # else:
+            #     self.D = discriminator_model.get_discriminator_model(3 + 1, 8, use_gpu)
+
         else:
             if self.use_pix2pix:
                 self.G = generator_model.get_generator_model(3, 1, 32, True)
             else:
                 if use_hierarchical_refinement:
-                    self.G = StereoNetGenerator(3, 1)
+                    # self.G = StereoNetGenerator(3, 1)
+                    self.G_global = GlobalNet(3, 1, interpol_rate=4)
+                    self.G_ref = HierarchicalRefinement()
                 else:
-                    self.G = CompleteGenerator(3, 1)
+                    # self.G = CompleteGenerator(3, 1)
+                    self.G_global = GlobalNet(3, 1, interpol_rate=2)
+                    self.G_ref = RefinementNet(3, 1)
 
             if self.use_Jung:
                 self.D = discriminator_model.get_discriminator_model_Jung(use_gpu=True)
@@ -72,7 +93,11 @@ class LearningController:
                 self.D = discriminator_model.get_discriminator_model(3 + 1, 8, use_gpu) #3 is for the condition (RGB) and
                                                                                     # +3 / +1 is for the output image
         #debugging output just for testing
-        print_network(self.G)
+        if self.use_pix2pix:
+            print_network(self.G)
+        else:
+            print_network(self.G_global)
+            print_network(self.G_ref)
         print_network(self.D)
 
         #data managers using the torch data util methods
@@ -94,7 +119,11 @@ class LearningController:
         self.last_val_loss = 0 #this is just initialization
 
         #need two optimizers as we have different numbers of params
-        self.optimizerG = optim.Adam(self.G.parameters(), lr=0.002, betas=(0.5, 0.999))
+        if self.use_pix2pix:
+            self.optimizerG = optim.Adam(self.G.parameters(), lr=0.002, betas=(0.5, 0.999))
+        else:
+            self.optimizerG_global = optim.Adam(self.G_global.parameters(), lr=0.002, betas=(0.5, 0.999))
+            self.optimizerG_ref = optim.Adam(self.G_ref.parameters(), lr=0.002, betas=(0.5, 0.999))
         self.optimizerD = optim.Adam(self.D.parameters(), lr=0.002, betas=(0.5, 0.999))
 
         #init a and b vars, we need them for our two input images
@@ -108,7 +137,11 @@ class LearningController:
         #get all the relevant variables ready for the gpu
         if use_gpu:
             self.D = self.D.cuda()
-            self.G = self.G.cuda()
+            if self.use_pix2pix:
+                self.G = self.G.cuda()
+            else:
+                self.G_global = self.G_global.cuda()
+                self.G_ref = self.G_ref.cuda()
             self.gan_loss = self.gan_loss.cuda()
             self.l1_loss = self.l1_loss.cuda()
             self.mse_loss = self.mse_loss.cuda()
@@ -221,7 +254,11 @@ class LearningController:
         # enumerate through the trainloader - thanks torch.utils.data, great job!
         #TODO: Use batches properly!
         # iteration = 0
-        self.optimizerG = optim.SGD(self.G.parameters(), lr=0.004)
+        if self.use_pix2pix:
+            self.optimizerG = optim.SGD(self.G.parameters(), lr=0.004)
+        else:
+            self.optimizerG_global = optim.SGD(self.G_global.parameters(), lr=0.004)
+            self.optimizerG_ref = optim.SGD(self.G_ref.parameters(), lr=0.004)
         self.optimizerD = optim.SGD(self.D.parameters(), lr=0.004)
 
         g_loss = 0
@@ -231,12 +268,12 @@ class LearningController:
         for iteration, data in enumerate(self.train_generator, 0):
             a_images, b_images = data
 
-            for im in b_images:
-                #TODO: Check here whether we actually want to use these images? Or already check in the generator
-                im = im[0]
-                avg_grad = image_analysis.get_avg_gradient(im)
-                rel_zeros = image_analysis.check_for_zeros(im)
-                print("AVERAGE GRADIENT: " + str(avg_grad) + " PERCENT ZEROS: " + str(rel_zeros))
+            # for im in b_images:
+            #     #TODO: Check here whether we actually want to use these images? Or already check in the generator
+            #     im = im[0]
+            #     avg_grad = image_analysis.get_avg_gradient(im)
+            #     rel_zeros = image_analysis.check_for_zeros(im)
+            #     print("AVERAGE GRADIENT: " + str(avg_grad) + " PERCENT ZEROS: " + str(rel_zeros))
 
             print("BATCH " + str(iteration+1) + "/" + str(len(self.train_generator)))
             for i in range(0, len(a_images)):
@@ -253,7 +290,9 @@ class LearningController:
 
                 #let G generate the fake image
                 if not self.use_pix2pix:
-                    fake_b, fake_b_global = self.G(self.real_a)
+                    # fake_b, fake_b_global = self.G(self.real_a)
+                    fake_b_global = self.G_global(self.real_a)
+                    fake_b = self.G_ref(self.real_a, fake_b_global)
                 else:
                     fake_b = self.G(self.real_a)
 
@@ -272,7 +311,11 @@ class LearningController:
                 fake_b = fake_b.cuda()
                 #Clear the gradients
                 self.optimizerD.zero_grad()
-                self.optimizerG.zero_grad()
+                if self.use_pix2pix:
+                    self.optimizerG.zero_grad()
+                else:
+                    self.optimizerG_global.zero_grad()
+                    self.optimizerG_ref.zero_grad()
 
                 if self.use_Jung:
                     print("USE JUNG DISCRIMINATOR")
@@ -307,10 +350,17 @@ class LearningController:
 
                 #Now for G -> get loss and do a step
                 #Get fake data from G and push it through D to get its prediction (real of fake)
-                loss_g_gan = self.gan_loss(pred_fake, True) * 0
+                if self.global_only:
+                    gan_weight = 0
+                    l1_weight = 1
+                else:
+                    gan_weight = 1
+                    l1_weight = 10
+
+                loss_g_gan = self.gan_loss(pred_fake, True) * gan_weight
 
                 # Addition of l1 loss
-                loss_g_l1 = self.l1_loss(fake_b, self.real_b) * 1 #In the paper they recommend lambda = 100!
+                loss_g_l1 = self.l1_loss(fake_b, self.real_b) * l1_weight #In the paper they recommend lambda = 100!
 
                 if not self.use_pix2pix:
                     loss_global_only = l1_only_global
@@ -323,10 +373,20 @@ class LearningController:
 
                 # if not self.use_pix2pix:
                 #     loss_g += loss_global_only
-                    
-                print("LOSS G CONSISTING OF GAN: " + str(loss_g_gan.data.item()) + " AND L1: " + str(loss_g_l1.data.item()))
-                loss_g.backward()
-                self.optimizerG.step()
+
+                if self.global_only:
+                    print("LOSS G CONSISTING OF L1: " + str(l1_only_global.data.item()))
+                    loss_g.backward()
+                    self.optimizerG_global.step()
+                elif self.train_only_ref:
+                    print("LOSS G CONSISTING OF GAN: " + str(loss_g_gan.data.item()) + " AND L1: " + str(loss_g_l1.data.item()))
+                    loss_g.backward()
+                    self.optimizerG_ref.step()
+                    self.optimizerG_global.step()
+                else:
+                    print("LOSS G CONSISTING OF L1: " + str(l1_only_global.data.item()))
+                    loss_g.backward()
+                    self.optimizerG.step()
 
                 g_loss += loss_g.data.item()
                 g_loss_count += 1
@@ -339,7 +399,11 @@ class LearningController:
 
         print("GOT " + str(g_loss_count) + " VALUES FOR TRAINING LOSS CALCULATION:")
 
-        overall_g_loss = (g_loss / g_loss_count) #Because we weigh 25xglobal + 25xrefine + 1xGAN
+        if self.global_only:
+            overall_g_loss = (g_loss / g_loss_count)
+        else:
+            overall_g_loss = (g_loss / g_loss_count) / 11 # because 10 L1 + 1 Adv
+
         overall_d_loss = d_loss / d_loss_count
         print("---> " + str(g_loss) + "/" + str(g_loss_count) + " = " + str(overall_g_loss))
         self.cur_l1_train = overall_g_loss
@@ -383,7 +447,8 @@ class LearningController:
             if self.use_pix2pix:
                 prediction = self.G(input)
             else:
-                prediction, prediction_global_only = self.G(input)
+                prediction_global_only = self.G_global(input)
+                prediction = self.G_ref(input, prediction_global_only)
             # mse = self.mse_loss(prediction, target)
 
             # prediction = prediction * (input > 0).float()  # only supervise non-zero
@@ -454,10 +519,17 @@ class LearningController:
         # net_g_model_out_path = "checkpoint/{}/netG_model_epoch_{}.pth".format("Test1", epoch)
         # net_d_model_out_path = "checkpoint/{}/netD_model_epoch_{}.pth".format("Test1", epoch)
 
-
-        net_g_model_out_path = "checkpoint/{}/netG_model.pth".format("Test1")
-        net_d_model_out_path = "checkpoint/{}/netD_model.pth".format("Test1")
-        torch.save(self.G, net_g_model_out_path)
-        torch.save(self.D, net_d_model_out_path)
+        if self.use_pix2pix:
+            net_g_model_out_path = "checkpoint/{}/netG_model.pth".format("Test1")
+            net_d_model_out_path = "checkpoint/{}/netD_model.pth".format("Test1")
+            torch.save(self.G, net_g_model_out_path)
+            torch.save(self.D, net_d_model_out_path)
+        else:
+            net_g_model_out_path_global = "checkpoint/{}/netG_global.pth".format("Test1")
+            net_g_model_out_path_refinement = "checkpoint/{}/netG_refinement.pth".format("Test1")
+            net_d_model_out_path = "checkpoint/{}/netD_model.pth".format("Test1")
+            torch.save(self.G_global, net_g_model_out_path_global)
+            torch.save(self.G_ref, net_g_model_out_path_refinement)
+            torch.save(self.D, net_d_model_out_path)
 
         print("Checkpoint saved to {}".format("checkpoint/" + "Test1"))
