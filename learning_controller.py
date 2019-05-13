@@ -22,6 +22,8 @@ import datetime
 from csv_plotter import CSVPlotter
 import image_analysis
 
+import eigen_generator
+
 #TODO: Add time check
 
 class LearningController:
@@ -78,14 +80,16 @@ class LearningController:
             if self.use_pix2pix:
                 self.G = generator_model.get_generator_model(3, 1, 32, True)
             else:
-                if use_hierarchical_refinement:
-                    # self.G = StereoNetGenerator(3, 1)
-                    self.G_global = GlobalNet(3, 1, interpol_rate=4)
-                    self.G_ref = HierarchicalRefinement()
-                else:
-                    # self.G = CompleteGenerator(3, 1)
-                    self.G_global = GlobalNet(3, 1, interpol_rate=2)
-                    self.G_ref = RefinementNet(3, 1)
+                self.G_global = eigen_generator.CoarsePredNet()
+                self.G_ref = eigen_generator.RefinementNet()
+                # if use_hierarchical_refinement:
+                #     # self.G = StereoNetGenerator(3, 1)
+                #     self.G_global = GlobalNet(3, 1, interpol_rate=4)
+                #     self.G_ref = HierarchicalRefinement()
+                # else:
+                #     # self.G = CompleteGenerator(3, 1)
+                #     self.G_global = GlobalNet(3, 1, interpol_rate=2)
+                #     self.G_ref = RefinementNet(3, 1)
 
             if self.use_Jung:
                 self.D = discriminator_model.get_discriminator_model_Jung(use_gpu=True)
@@ -300,10 +304,14 @@ class LearningController:
                 # -> don't learn zero spots!
                 # Addition of l1 loss
                 print(fake_b.size())
-                fake_b = fake_b * (self.real_b > 0).float()  # only supervise non-zero
+                supervise_zero = True
+
+                if not supervise_zero:
+                    fake_b = fake_b * (self.real_b > 0).float()  # only supervise non-zero
 
                 if not self.use_pix2pix:
-                    fake_b_global = fake_b_global * (self.real_b > 0).float()
+                    if not supervise_zero:
+                        fake_b_global = fake_b_global * (self.real_b > 0).float()
 
                     l1_only_global = self.l1_loss(fake_b_global, self.real_b)
                     weight_only_global = 0
@@ -354,8 +362,8 @@ class LearningController:
                     gan_weight = 0
                     l1_weight = 1
                 else:
-                    gan_weight = 1
-                    l1_weight = 10
+                    gan_weight = 0
+                    l1_weight = 1
 
                 loss_g_gan = self.gan_loss(pred_fake, True) * gan_weight
 
@@ -454,11 +462,18 @@ class LearningController:
             # prediction = prediction * (input > 0).float()  # only supervise non-zero
             # loss_g_l1 = self.l1_loss(prediction, self.real_b)
             # print("L1 Test: " + str(loss_g_l1))
+            supervise_zero = True
 
-            if self.global_only:
-                sup_pred = prediction_global_only * (target > 0).float()
+            if not supervise_zero:
+                if self.global_only:
+                    sup_pred = prediction_global_only * (target > 0).float()
+                else:
+                    sup_pred = prediction * (target > 0).float()  # only supervise non-zero
             else:
-                sup_pred = prediction * (target > 0).float()  # only supervise non-zero
+                if self.global_only:
+                    sup_pred = prediction_global_only
+                else:
+                    sup_pred = prediction
 
             l1 = self.l1_loss(sup_pred, target)
             l1_loss = l1.data.item()

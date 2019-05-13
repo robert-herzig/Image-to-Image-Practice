@@ -77,8 +77,11 @@ class DataManager(data.Dataset):
         a_img = cv2.imread(self.a_images[index])
         b_img = cv2.imread(self.b_images[index], 0) #If we want RGB output, the second param should be 1 or empty
 
-        a_img = cv2.resize(a_img, (0, 0), fx=0.75, fy=0.75)
-        b_img = cv2.resize(b_img, (0, 0), fx=0.75, fy=0.75)
+        # a_img = cv2.resize(a_img, (0, 0), fx=0.75, fy=0.75)
+        # b_img = cv2.resize(b_img, (0, 0), fx=0.75, fy=0.75)
+
+        a_img = cv2.resize(a_img, (0, 0), fx=0.5, fy=0.5)
+        b_img = cv2.resize(b_img, (0, 0), fx=0.5, fy=0.5)
 
         # grads = image_analysis.get_avg_gradient(b_img)
         # num_zeros = image_analysis.check_for_zeros(b_img)
@@ -96,11 +99,13 @@ class DataManager(data.Dataset):
             b_img = b_img[starting_point:starting_point + 64, starting_point:starting_point + 64]
             b_img = b_img[:, :, np.newaxis] #add the extra axis so we can work with this as  we do with rgb -> less code
         else:
-            a_img = a_img[30:286, 30:286]
+            # a_img = a_img[30:286, 30:286] #TODO: This is for squares
+            a_img = a_img[3:131, 50:562]
             a_img = a_img[..., ::-1]  # convert BGR (cv2) to RGB (what we want later)
             a_img = a_img.copy()  # remove negative strides
 
-            b_img = b_img[30:286, 30:286]
+            # b_img = b_img[30:286, 30:286]
+            b_img = b_img[3:131, 50:562]
             b_img = b_img[:, :, np.newaxis]  # add the extra axis so we can work with this as  we do with rgb -> less code
             
         #print(a_img.shape)

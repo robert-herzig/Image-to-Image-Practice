@@ -41,5 +41,5 @@ class Main:
 
 if __name__ == '__main__':
     main_controller = Main(pix2pix=False, global_only=False, train_only_refinement=True)
-    main_controller.test("datasets/NYU2", 251, True, "checkpoint/Test1/netG_model.pth", "checkpoint/Test1/netD_model.pth")
+    main_controller.test("datasets/KITTI", 351, False, "checkpoint/Test1/netG_model.pth", "checkpoint/Test1/netD_model.pth")
     # main_controller.train_only_global_generator("datasets/NYU2", 101, False, "checkpoint/Test1/netG_model.pth", "checkpoint/Test1/netD_model.pth")
